@@ -172,6 +172,10 @@ impl<S: LogStorage> RaftNode<S> {
             return;
         }
 
+        if resp.term < self.hard_state.current_term {
+            return;
+        }
+
         if self.role != NodeRole::Candidate {
             return;
         }
@@ -461,6 +465,32 @@ mod tests {
 
         node1.handle_request_vote_response(2, &resp2);
         assert_eq!(node1.role(), NodeRole::Leader);
+    }
+
+    #[test]
+    fn candidate_ignores_stale_vote_response() {
+        let config = test_config(1, vec![2, 3]);
+        let mut node = RaftNode::new(config, MemStorage::new());
+
+        node.election_deadline = Instant::now() - Duration::from_millis(1);
+        node.tick();
+        assert_eq!(node.role(), NodeRole::Candidate);
+        assert_eq!(node.current_term(), 1);
+        let _ = node.take_ready();
+
+        node.election_deadline = Instant::now() - Duration::from_millis(1);
+        node.tick();
+        assert_eq!(node.role(), NodeRole::Candidate);
+        assert_eq!(node.current_term(), 2);
+
+        let stale_yes = RequestVoteResponse {
+            term: 1,
+            vote_granted: true,
+        };
+        node.handle_request_vote_response(2, &stale_yes);
+
+        assert_eq!(node.role(), NodeRole::Candidate);
+        assert_eq!(node.current_term(), 2);
     }
 
     #[test]

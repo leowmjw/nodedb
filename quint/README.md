@@ -38,6 +38,21 @@ Run the Rust implementation against Quint-generated traces with
 cargo test -p nodedb-raft single_voter_core_matches_quint -- --nocapture
 ```
 
+Run the three-node election model directly:
+
+```sh
+quint run quint/raft/SingleGroupElection.qnt \
+  --max-samples 500 \
+  --max-steps 20 \
+  --invariants electionSafety termMonotonic oneVotePerTerm
+```
+
+Run the three-node election model against the Rust implementation:
+
+```sh
+cargo test -p nodedb-raft election_matches_quint -- --nocapture
+```
+
 Run all Raft crate tests, including the Quint-connect test:
 
 ```sh
@@ -47,8 +62,12 @@ cargo test -p nodedb-raft
 ## Current Files
 
 - `raft/Core.qnt`: single-node, single-voter model and basic invariants.
+- `raft/SingleGroupElection.qnt`: three-voter election model with in-flight
+  `RequestVote` and `RequestVoteResponse` queues.
 - `../nodedb-raft/src/node/quint_connect_core.rs`: Rust driver for
   `quint-connect`.
+- `../nodedb-raft/src/node/quint_connect_election.rs`: Rust driver for the
+  election model.
 
 ## Workflow
 
