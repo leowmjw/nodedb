@@ -141,9 +141,6 @@ zstd = { workspace = true }
 # System calls (eventfd for TPC wake)
 libc = { workspace = true }
 
-# io_uring for Data Plane batched I/O (columnar reads, WAL)
-io-uring = { workspace = true }
-
 # SQL parser (used by function body validation and procedural executor)
 sqlparser = "0.61"
 
@@ -171,3 +168,7 @@ default = []
 # Enables crash-injection points used by recovery tests. Off by default; tests
 # that exercise the framework opt in via `--features failpoints`.
 failpoints = []
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# io_uring for Data Plane batched I/O (columnar reads, WAL) — Linux only
+io-uring = { workspace = true }

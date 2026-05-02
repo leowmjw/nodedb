@@ -101,17 +101,17 @@ NodeDB is not a specialized timeseries database, yet it ingests 1.65x faster tha
 ## Install
 
 ```bash
-# Docker
+# Docker — works on Linux, macOS, and Windows
 docker run -d \
   -p 6432:6432 -p 6433:6433 -p 6480:6480 \
   -v nodedb-data:/var/lib/nodedb \
   farhansyah/nodedb:latest
 
-# Cargo
+# Cargo — Linux only (kernel ≥ 5.1 required for io_uring)
 cargo install nodedb
 ```
 
-Requires Linux kernel >= 5.1 (io_uring). Connect:
+Connect:
 
 ```bash
 ndb                              # native CLI (connects to localhost:6433)
@@ -198,7 +198,7 @@ We welcome bug fixes, engine improvements, new codecs and analyzers, test covera
 
 ## Building from Source
 
-For development or contributing:
+For development or contributing. Requires Rust 1.94+ and Linux (the Data Plane uses io_uring; macOS/Windows users should use Docker).
 
 ```bash
 git clone https://github.com/NodeDB-Lab/nodedb.git
