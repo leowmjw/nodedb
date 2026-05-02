@@ -17,5 +17,8 @@ mod internal;
 pub mod membership;
 pub mod rpc;
 
+#[cfg(test)]
+mod quint_connect_core;
+
 pub use self::config::RaftConfig;
 pub use self::core::{RaftNode, Ready};

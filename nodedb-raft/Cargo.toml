@@ -31,5 +31,7 @@ crc32c = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+anyhow = { workspace = true }
+quint-connect = "0.1.1"
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }
