@@ -236,13 +236,14 @@ impl<S: LogStorage> RaftNode<S> {
     }
 
     pub(super) fn collect_committed_entries(&mut self) {
-        let from = self.volatile.last_applied + 1;
+        let from = self.volatile.last_applied.max(self.ready_commit_index) + 1;
         let to = self.volatile.commit_index;
         if from > to {
             return;
         }
         if let Ok(entries) = self.log.entries_range(from, to) {
             self.ready.committed_entries.extend(entries.iter().cloned());
+            self.ready_commit_index = to;
         }
     }
 

@@ -25,6 +25,7 @@ struct ModelState {
     voted_for: i64,
     commit_index: i64,
     last_applied: i64,
+    ready_commit_index: i64,
     leader_id: i64,
     log: Vec<ModelLogEntry>,
     ready_hard_state: bool,
@@ -71,10 +72,16 @@ impl State<SingleVoterDriver> for ModelState {
             voted_for: node.hard_state.voted_for as i64,
             commit_index: node.volatile.commit_index as i64,
             last_applied: node.volatile.last_applied as i64,
+            ready_commit_index: node.ready_commit_index as i64,
             leader_id: node.leader_id as i64,
             log,
             ready_hard_state: node.ready.hard_state.is_some(),
-            ready_committed: node.ready.committed_entries.iter().map(model_entry).collect(),
+            ready_committed: node
+                .ready
+                .committed_entries
+                .iter()
+                .map(model_entry)
+                .collect(),
         })
     }
 }
@@ -127,15 +134,15 @@ impl SingleVoterDriver {
     }
 
     fn node(&self) -> Result<&RaftNode<MemStorage>> {
-        self.node.as_ref().ok_or_else(|| {
-            std::io::Error::other("driver used before init").into()
-        })
+        self.node
+            .as_ref()
+            .ok_or_else(|| std::io::Error::other("driver used before init").into())
     }
 
     fn node_mut(&mut self) -> Result<&mut RaftNode<MemStorage>> {
-        self.node.as_mut().ok_or_else(|| {
-            std::io::Error::other("driver used before init").into()
-        })
+        self.node
+            .as_mut()
+            .ok_or_else(|| std::io::Error::other("driver used before init").into())
     }
 }
 

@@ -65,6 +65,8 @@ pub struct RaftNode<S: LogStorage> {
     pub(super) votes_received: HashSet<u64>,
     /// Pending ready output.
     pub(super) ready: Ready,
+    /// Highest committed log index already emitted through `Ready`.
+    pub(super) ready_commit_index: u64,
     /// Known leader ID (0 = unknown).
     pub(super) leader_id: u64,
 }
@@ -92,6 +94,7 @@ impl<S: LogStorage> RaftNode<S> {
             heartbeat_deadline: now,
             votes_received: HashSet::new(),
             ready: Ready::default(),
+            ready_commit_index: 0,
             leader_id: 0,
             config,
         }
@@ -291,6 +294,32 @@ mod tests {
         let ready = node.take_ready();
         assert_eq!(ready.committed_entries.len(), 1);
         assert_eq!(ready.committed_entries[0].data, b"hello");
+    }
+
+    #[test]
+    fn ready_committed_entries_are_not_reemitted_before_advance() {
+        let config = test_config(1, vec![]);
+        let mut node = RaftNode::new(config, MemStorage::new());
+        node.election_deadline = Instant::now() - Duration::from_millis(1);
+        node.tick();
+
+        let ready = node.take_ready();
+        assert_eq!(ready.committed_entries.len(), 1);
+        assert_eq!(ready.committed_entries[0].index, 1);
+
+        let idx = node.propose(b"hello".to_vec()).unwrap();
+        assert_eq!(idx, 2);
+
+        let ready = node.take_ready();
+        assert_eq!(
+            ready
+                .committed_entries
+                .iter()
+                .map(|entry| entry.index)
+                .collect::<Vec<_>>(),
+            vec![2],
+            "Ready must contain only newly emitted committed entries"
+        );
     }
 
     #[test]
