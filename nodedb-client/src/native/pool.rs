@@ -238,4 +238,85 @@ mod tests {
         });
         assert_eq!(pool.semaphore.available_permits(), 5);
     }
+
+    /// Regression test: pool must not call `perform_client_handshake()` twice.
+    ///
+    /// `NativeConnection::connect()` already performs the handshake internally.
+    /// A previous bug in `Pool::acquire()` called it a second time immediately
+    /// after `connect()` returned, causing the server — now in frame-read mode —
+    /// to see `NDBH` (0x4E44_4248 = 1313096264) as a frame-length prefix and
+    /// reject the connection with "frame size 1313096264 exceeds maximum 16777216".
+    ///
+    /// This test catches that by asserting the bytes immediately following the
+    /// HelloAck are a regular frame-length prefix, not a second HelloFrame magic.
+    #[tokio::test]
+    async fn pool_does_not_send_double_handshake() {
+        use nodedb_types::protocol::{HelloAckFrame, HELLO_MAGIC, NativeResponse};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+
+            // Read the one and only HelloFrame (16 raw bytes, no length prefix).
+            let mut hello_buf = [0u8; 16];
+            stream.read_exact(&mut hello_buf).await.unwrap();
+            let magic = u32::from_be_bytes([
+                hello_buf[0], hello_buf[1], hello_buf[2], hello_buf[3],
+            ]);
+            assert_eq!(magic, HELLO_MAGIC, "first message should be a HelloFrame");
+
+            // Reply with a minimal HelloAckFrame.
+            let ack = HelloAckFrame {
+                proto_version: 1,
+                capabilities: 0,
+                server_version: "NodeDB/test".into(),
+                limits: Limits::default(),
+            }
+            .encode();
+            stream.write_all(&ack).await.unwrap();
+            stream.flush().await.unwrap();
+
+            // Read the next 4 bytes. These must be the frame-length prefix of
+            // the Auth request — NOT another NDBH magic (the double-handshake bug).
+            let mut next4 = [0u8; 4];
+            stream.read_exact(&mut next4).await.unwrap();
+            let next_u32 = u32::from_be_bytes(next4);
+            assert_ne!(
+                next_u32, HELLO_MAGIC,
+                "pool sent a second HelloFrame (double-handshake regression): \
+                 server saw 0x{next_u32:08X} = {next_u32} where a frame-length was expected"
+            );
+
+            // Drain the Auth payload and reply with auth-ok so the pool succeeds.
+            let mut payload = vec![0u8; next_u32 as usize];
+            stream.read_exact(&mut payload).await.unwrap();
+
+            let resp = NativeResponse::auth_ok(1, "test".into(), 0);
+            let encoded = zerompk::to_msgpack_vec(&resp).unwrap();
+            let len = (encoded.len() as u32).to_be_bytes();
+            stream.write_all(&len).await.unwrap();
+            stream.write_all(&encoded).await.unwrap();
+            stream.flush().await.unwrap();
+        });
+
+        let pool = Pool::new(PoolConfig {
+            addr: addr.to_string(),
+            max_size: 1,
+            auth: AuthMethod::Trust {
+                username: "test".into(),
+            },
+            ..Default::default()
+        });
+
+        // acquire() runs connect() (which handshakes) then authenticate().
+        // This is the exact sequence that triggered the double-handshake bug.
+        let _conn = pool.acquire().await.expect("pool acquire should succeed");
+
+        // Server task will panic if it saw a second HelloFrame.
+        server.await.unwrap();
+    }
 }
