@@ -20,7 +20,7 @@ module SingleGroupReplication {
   pure val GROUP_ID = 1
   pure val LEADER = 1
   pure val NOOP = 0
-  pure val COMMANDS = Set(1, 2)
+  pure val COMMANDS = Set(3, 4)
   pure val MAX_LOG_LENGTH = 3
 
   var role1: str
@@ -55,6 +55,8 @@ module SingleGroupReplication {
   var readyCommitted3: List[LogEntry]
 
   pure def noopEntry = { term: 1, index: 1, data: NOOP }
+  pure def leaderEntry2 = { term: 3, index: 2, data: 1 }
+  pure def conflictEntry2 = { term: 2, index: 2, data: 2 }
 
   def roleOf(n) =
     if (n == 1) role1 else if (n == 2) role2 else role3
@@ -157,6 +159,20 @@ module SingleGroupReplication {
     },
   }
 
+  def leaderAppendReqAt(dst, nextIdx) = {
+    src: LEADER,
+    dst: dst,
+    req: {
+      term: currentTerm1,
+      leaderId: LEADER,
+      prevLogIndex: nextIdx - 1,
+      prevLogTerm: termAt(log1, nextIdx - 1),
+      entries: entriesFrom(log1, nextIdx),
+      leaderCommit: commitIndex1,
+      groupId: GROUP_ID,
+    },
+  }
+
   pure def appendResp(src, dst, term, success, lastLogIndex) = {
     src: src,
     dst: dst,
@@ -165,6 +181,13 @@ module SingleGroupReplication {
 
   pure def validPrev(entries, req) =
     req.prevLogIndex == 0 or termAt(entries, req.prevLogIndex) == req.prevLogTerm
+
+  pure def retryNextIndex(lastLogIndex, currentNextIndex) =
+    if (lastLogIndex + 1 < currentNextIndex) {
+      maxInt(lastLogIndex + 1, 1)
+    } else {
+      maxInt(currentNextIndex - 1, 1)
+    }
 
   pure def commitWithAck(peer, lastLogIndex, currentCommit) =
     if (lastLogIndex > currentCommit) {
@@ -177,8 +200,8 @@ module SingleGroupReplication {
     role1' = "Leader",
     role2' = "Follower",
     role3' = "Follower",
-    currentTerm1' = 1,
-    currentTerm2' = 0,
+    currentTerm1' = 3,
+    currentTerm2' = 2,
     currentTerm3' = 0,
     leaderId1' = 1,
     leaderId2' = 0,
@@ -192,14 +215,41 @@ module SingleGroupReplication {
     readyCommitIndex1' = 0,
     readyCommitIndex2' = 0,
     readyCommitIndex3' = 0,
-    log1' = List(noopEntry),
-    log2' = List(),
+    log1' = List(noopEntry, leaderEntry2),
+    log2' = List(noopEntry, conflictEntry2),
     log3' = List(),
-    nextIndex2' = 1,
+    nextIndex2' = 3,
     nextIndex3' = 1,
     matchIndex2' = 0,
     matchIndex3' = 0,
-    appendMessages' = List(appendReq(2, 1, 0), appendReq(3, 1, 0)),
+    appendMessages' = List(
+      {
+        src: LEADER,
+        dst: 2,
+        req: {
+          term: 3,
+          leaderId: LEADER,
+          prevLogIndex: 2,
+          prevLogTerm: 3,
+          entries: List(),
+          leaderCommit: 0,
+          groupId: GROUP_ID,
+        },
+      },
+      {
+        src: LEADER,
+        dst: 3,
+        req: {
+          term: 3,
+          leaderId: LEADER,
+          prevLogIndex: 0,
+          prevLogTerm: 0,
+          entries: List(noopEntry, leaderEntry2),
+          leaderCommit: 0,
+          groupId: GROUP_ID,
+        },
+      }
+    ),
     appendResponses' = List(),
     readyCommitted1' = List(),
     readyCommitted2' = List(),
@@ -268,9 +318,9 @@ module SingleGroupReplication {
       currentTerm1' = if (msg.dst == 1) newTerm else currentTerm1,
       currentTerm2' = if (msg.dst == 2) newTerm else currentTerm2,
       currentTerm3' = if (msg.dst == 3) newTerm else currentTerm3,
-      leaderId1' = if (msg.dst == 1 and accepted) msg.req.leaderId else leaderId1,
-      leaderId2' = if (msg.dst == 2 and accepted) msg.req.leaderId else leaderId2,
-      leaderId3' = if (msg.dst == 3 and accepted) msg.req.leaderId else leaderId3,
+      leaderId1' = if (msg.dst == 1 and msg.req.term >= currentTerm1) msg.req.leaderId else leaderId1,
+      leaderId2' = if (msg.dst == 2 and msg.req.term >= currentTerm2) msg.req.leaderId else leaderId2,
+      leaderId3' = if (msg.dst == 3 and msg.req.term >= currentTerm3) msg.req.leaderId else leaderId3,
       commitIndex1' = if (msg.dst == 1) newCommit else commitIndex1,
       commitIndex2' = if (msg.dst == 2) newCommit else commitIndex2,
       commitIndex3' = if (msg.dst == 3) newCommit else commitIndex3,
@@ -297,8 +347,10 @@ module SingleGroupReplication {
 
   action HandleAppendEntriesResponse = {
     val msg = appendResponses[0]
-    val newMatch = if (msg.resp.success) msg.resp.lastLogIndex else matchIndexOf(msg.src)
-    val newCommit = if (msg.resp.success) commitWithAck(msg.src, msg.resp.lastLogIndex, commitIndex1) else commitIndex1
+    val stale = msg.resp.term < currentTerm1
+    val newMatch = if (not(stale) and msg.resp.success) msg.resp.lastLogIndex else matchIndexOf(msg.src)
+    val newCommit = if (not(stale) and msg.resp.success) commitWithAck(msg.src, msg.resp.lastLogIndex, commitIndex1) else commitIndex1
+    val retryNext = retryNextIndex(msg.resp.lastLogIndex, nextIndexOf(msg.src))
     all {
       appendResponses.length() > 0,
       role1' = role1,
@@ -322,16 +374,52 @@ module SingleGroupReplication {
       log1' = log1,
       log2' = log2,
       log3' = log3,
-      nextIndex2' = if (msg.src == 2 and msg.resp.success) newMatch + 1 else nextIndex2,
-      nextIndex3' = if (msg.src == 3 and msg.resp.success) newMatch + 1 else nextIndex3,
-      matchIndex2' = if (msg.src == 2 and msg.resp.success) newMatch else matchIndex2,
-      matchIndex3' = if (msg.src == 3 and msg.resp.success) newMatch else matchIndex3,
-      appendMessages' = appendMessages,
+      nextIndex2' = if (not(stale) and msg.src == 2 and msg.resp.success) newMatch + 1 else if (not(stale) and msg.src == 2 and not(msg.resp.success)) retryNext else nextIndex2,
+      nextIndex3' = if (not(stale) and msg.src == 3 and msg.resp.success) newMatch + 1 else if (not(stale) and msg.src == 3 and not(msg.resp.success)) retryNext else nextIndex3,
+      matchIndex2' = if (not(stale) and msg.src == 2 and msg.resp.success) newMatch else matchIndex2,
+      matchIndex3' = if (not(stale) and msg.src == 3 and msg.resp.success) newMatch else matchIndex3,
+      appendMessages' = if (stale or msg.resp.success) appendMessages else appendMessages.append(leaderAppendReqAt(msg.src, retryNext)),
       appendResponses' = appendResponses.slice(1, appendResponses.length()),
       readyCommitted1' = readyCommitted1.concat(committedEntries(log1, lastApplied1, readyCommitIndex1, newCommit)),
       readyCommitted2' = readyCommitted2,
       readyCommitted3' = readyCommitted3,
     }
+  }
+
+  action InjectStaleAppendEntriesResponse = all {
+    role1 == "Leader",
+    currentTerm1 > 0,
+    appendResponses.length() < 4,
+    role1' = role1,
+    role2' = role2,
+    role3' = role3,
+    currentTerm1' = currentTerm1,
+    currentTerm2' = currentTerm2,
+    currentTerm3' = currentTerm3,
+    leaderId1' = leaderId1,
+    leaderId2' = leaderId2,
+    leaderId3' = leaderId3,
+    commitIndex1' = commitIndex1,
+    commitIndex2' = commitIndex2,
+    commitIndex3' = commitIndex3,
+    lastApplied1' = lastApplied1,
+    lastApplied2' = lastApplied2,
+    lastApplied3' = lastApplied3,
+    readyCommitIndex1' = readyCommitIndex1,
+    readyCommitIndex2' = readyCommitIndex2,
+    readyCommitIndex3' = readyCommitIndex3,
+    log1' = log1,
+    log2' = log2,
+    log3' = log3,
+    nextIndex2' = nextIndex2,
+    nextIndex3' = nextIndex3,
+    matchIndex2' = matchIndex2,
+    matchIndex3' = matchIndex3,
+    appendMessages' = appendMessages,
+    appendResponses' = appendResponses.append(appendResp(2, 1, currentTerm1 - 1, true, log1.length())),
+    readyCommitted1' = readyCommitted1,
+    readyCommitted2' = readyCommitted2,
+    readyCommitted3' = readyCommitted3,
   }
 
   action TakeReady = {
@@ -446,6 +534,7 @@ module SingleGroupReplication {
     ClientPropose,
     HandleAppendEntries,
     HandleAppendEntriesResponse,
+    InjectStaleAppendEntriesResponse,
     TakeReady,
     AdvanceApplied,
     Noop,
@@ -453,6 +542,9 @@ module SingleGroupReplication {
 
   pure def sameEntryAt(a, b, i) =
     i == 0 or i > a.length() or i > b.length() or a[i - 1] == b[i - 1]
+
+  pure def sameTermImpliesSameEntryAt(a, b, i) =
+    i == 0 or i > a.length() or i > b.length() or a[i - 1].term != b[i - 1].term or a[i - 1] == b[i - 1]
 
   val commitWithinLog =
     commitIndex1 <= log1.length() and commitIndex2 <= log2.length() and commitIndex3 <= log3.length()
@@ -464,9 +556,9 @@ module SingleGroupReplication {
     commitIndex1 >= 0 and commitIndex2 >= 0 and commitIndex3 >= 0
 
   val logMatching =
-    sameEntryAt(log1, log2, 1) and sameEntryAt(log1, log2, 2) and sameEntryAt(log1, log2, 3) and
-      sameEntryAt(log1, log3, 1) and sameEntryAt(log1, log3, 2) and sameEntryAt(log1, log3, 3) and
-      sameEntryAt(log2, log3, 1) and sameEntryAt(log2, log3, 2) and sameEntryAt(log2, log3, 3)
+    sameTermImpliesSameEntryAt(log1, log2, 1) and sameTermImpliesSameEntryAt(log1, log2, 2) and sameTermImpliesSameEntryAt(log1, log2, 3) and
+      sameTermImpliesSameEntryAt(log1, log3, 1) and sameTermImpliesSameEntryAt(log1, log3, 2) and sameTermImpliesSameEntryAt(log1, log3, 3) and
+      sameTermImpliesSameEntryAt(log2, log3, 1) and sameTermImpliesSameEntryAt(log2, log3, 2) and sameTermImpliesSameEntryAt(log2, log3, 3)
 
   val stateMachineSafety =
     sameEntryAt(log1.slice(0, lastApplied1), log2.slice(0, lastApplied2), 1) and

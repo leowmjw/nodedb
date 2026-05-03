@@ -209,7 +209,7 @@ cargo test -p nodedb-raft election_matches_quint -- --nocapture
 
 quint run quint/raft/SingleGroupReplication.qnt \
   --max-samples 500 \
-  --max-steps 20 \
+  --max-steps 24 \
   --invariants logMatching commitWithinLog appliedWithinCommit commitMonotonic stateMachineSafety
 
 cargo test -p nodedb-raft append_entries_replication_matches_quint -- --nocapture

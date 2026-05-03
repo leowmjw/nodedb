@@ -133,6 +133,10 @@ impl<S: LogStorage> RaftNode<S> {
             return;
         }
 
+        if resp.term < self.hard_state.current_term {
+            return;
+        }
+
         if self.role != NodeRole::Leader {
             return;
         }
@@ -491,6 +495,39 @@ mod tests {
 
         assert_eq!(node.role(), NodeRole::Candidate);
         assert_eq!(node.current_term(), 2);
+    }
+
+    #[test]
+    fn leader_ignores_stale_append_entries_response() {
+        let config = test_config(1, vec![2, 3]);
+        let mut node = RaftNode::new(config, MemStorage::new());
+
+        node.election_deadline = Instant::now() - Duration::from_millis(1);
+        node.tick();
+        let _ = node.take_ready();
+        node.handle_request_vote_response(
+            2,
+            &RequestVoteResponse {
+                term: 1,
+                vote_granted: true,
+            },
+        );
+        assert_eq!(node.role(), NodeRole::Leader);
+
+        node.election_deadline = Instant::now() - Duration::from_millis(1);
+        node.tick();
+        assert_eq!(node.role(), NodeRole::Leader);
+        assert_eq!(node.current_term(), 1);
+
+        let stale_ok = AppendEntriesResponse {
+            term: 0,
+            success: true,
+            last_log_index: node.log.last_index(),
+        };
+        node.handle_append_entries_response(2, &stale_ok);
+
+        assert_eq!(node.match_index_for(2), Some(0));
+        assert_eq!(node.commit_index(), 0);
     }
 
     #[test]

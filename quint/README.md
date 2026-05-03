@@ -59,7 +59,7 @@ Run the AppendEntries replication model directly:
 ```sh
 quint run quint/raft/SingleGroupReplication.qnt \
   --max-samples 500 \
-  --max-steps 20 \
+  --max-steps 24 \
   --invariants logMatching commitWithinLog appliedWithinCommit commitMonotonic stateMachineSafety
 ```
 
@@ -81,8 +81,9 @@ cargo test -p nodedb-raft
 - `raft/SingleGroupElection.qnt`: three-voter election model with in-flight
   `RequestVote` and `RequestVoteResponse` queues.
 - `raft/SingleGroupReplication.qnt`: established three-node leader model with
-  AppendEntries delivery, follower responses, quorum commit advancement,
-  `Ready.committed_entries`, and apply advancement.
+  AppendEntries rejection, conflict repair, stale response filtering, follower
+  responses, quorum commit advancement, `Ready.committed_entries`, and apply
+  advancement.
 - `../nodedb-raft/src/node/quint_connect_core.rs`: Rust driver for
   `quint-connect`.
 - `../nodedb-raft/src/node/quint_connect_election.rs`: Rust driver for the

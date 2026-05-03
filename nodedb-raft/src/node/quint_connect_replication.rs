@@ -105,6 +105,7 @@ impl Driver for ReplicationDriver {
             ClientPropose(data) => self.client_propose(data)?,
             HandleAppendEntries => self.handle_append_entries()?,
             HandleAppendEntriesResponse => self.handle_append_entries_response()?,
+            InjectStaleAppendEntriesResponse => self.inject_stale_append_entries_response()?,
             TakeReady(n) => self.take_ready(n)?,
             AdvanceApplied(n) => self.advance_applied(n)?,
             Noop => (),
@@ -167,17 +168,38 @@ impl ReplicationDriver {
 
         let leader = self.node_mut(1)?;
         leader.role = NodeRole::Leader;
-        leader.hard_state.current_term = 1;
+        leader.hard_state.current_term = 3;
         leader.hard_state.voted_for = 1;
         leader.leader_id = 1;
-        leader.leader_state = Some(LeaderState::new(&[2, 3], 0));
+        leader.leader_state = Some(LeaderState::new(&[2, 3], 2));
         leader.log.append(LogEntry {
             term: 1,
             index: 1,
             data: Vec::new(),
         })?;
+        leader.log.append(LogEntry {
+            term: 3,
+            index: 2,
+            data: vec![1],
+        })?;
+        if let Some(leader_state) = leader.leader_state.as_mut() {
+            leader_state.set_next_index(3, 1);
+        }
         leader.replicate_to_all();
         self.drain_append_messages(1);
+
+        let follower = self.node_mut(2)?;
+        follower.hard_state.current_term = 2;
+        follower.log.append(LogEntry {
+            term: 1,
+            index: 1,
+            data: Vec::new(),
+        })?;
+        follower.log.append(LogEntry {
+            term: 2,
+            index: 2,
+            data: vec![2],
+        })?;
 
         Ok(())
     }
@@ -210,6 +232,20 @@ impl ReplicationDriver {
         self.node_mut(msg.dst as u64)?
             .handle_append_entries_response(msg.src as u64, &resp);
         self.drain_append_messages(msg.dst as u64);
+        Ok(())
+    }
+
+    fn inject_stale_append_entries_response(&mut self) -> Result {
+        let leader = self.node(1)?;
+        self.append_responses.push(ModelAppendResponseEnvelope {
+            src: 2,
+            dst: 1,
+            resp: ModelAppendEntriesResponse {
+                term: leader.hard_state.current_term.saturating_sub(1) as i64,
+                success: true,
+                last_log_index: leader.log.last_index() as i64,
+            },
+        });
         Ok(())
     }
 
