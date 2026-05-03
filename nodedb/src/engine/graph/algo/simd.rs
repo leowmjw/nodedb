@@ -272,46 +272,44 @@ pub mod neon {
 
     pub fn fill_f64(dst: &mut [f64], val: f64) {
         // SAFETY: NEON is guaranteed on aarch64.
-        unsafe { fill_f64_inner(dst, val) }
-    }
-
-    unsafe fn fill_f64_inner(dst: &mut [f64], val: f64) {
-        let n = dst.len();
-        let vec_val = vdupq_n_f64(val);
-        let mut i = 0;
-        while i + LANE <= n {
-            vst1q_f64(dst.as_mut_ptr().add(i), vec_val);
-            i += LANE;
+        let vec_val = unsafe { vdupq_n_f64(val) };
+        let mut chunks = dst.chunks_exact_mut(LANE);
+        for chunk in &mut chunks {
+            // SAFETY: `chunks_exact_mut(LANE)` gives exactly two contiguous f64s,
+            // and NEON is guaranteed on aarch64.
+            unsafe { vst1q_f64(chunk.as_mut_ptr(), vec_val) };
         }
-        while i < n {
-            *dst.get_unchecked_mut(i) = val;
-            i += 1;
+        for item in chunks.into_remainder() {
+            *item = val;
         }
     }
 
     pub fn l1_norm_delta(a: &[f64], b: &[f64]) -> f64 {
-        unsafe { l1_norm_delta_inner(a, b) }
-    }
-
-    unsafe fn l1_norm_delta_inner(a: &[f64], b: &[f64]) -> f64 {
         let n = a.len().min(b.len());
-        let mut acc = vdupq_n_f64(0.0);
-        let mut i = 0;
+        let a = &a[..n];
+        let b = &b[..n];
+        // SAFETY: NEON is guaranteed on aarch64.
+        let mut acc = unsafe { vdupq_n_f64(0.0) };
+        let mut a_chunks = a.chunks_exact(LANE);
+        let mut b_chunks = b.chunks_exact(LANE);
 
-        while i + LANE <= n {
-            let va = vld1q_f64(a.as_ptr().add(i));
-            let vb = vld1q_f64(b.as_ptr().add(i));
-            let diff = vsubq_f64(va, vb);
-            let abs_diff = vabsq_f64(diff);
-            acc = vaddq_f64(acc, abs_diff);
-            i += LANE;
+        for (a_chunk, b_chunk) in a_chunks.by_ref().zip(b_chunks.by_ref()) {
+            // SAFETY: `chunks_exact(LANE)` gives exactly two contiguous f64s
+            // for each input, and both slices were truncated to the same length.
+            unsafe {
+                let va = vld1q_f64(a_chunk.as_ptr());
+                let vb = vld1q_f64(b_chunk.as_ptr());
+                let diff = vsubq_f64(va, vb);
+                let abs_diff = vabsq_f64(diff);
+                acc = vaddq_f64(acc, abs_diff);
+            }
         }
 
-        let mut sum = vgetq_lane_f64(acc, 0) + vgetq_lane_f64(acc, 1);
+        // SAFETY: `acc` is a valid NEON register produced by NEON intrinsics.
+        let mut sum = unsafe { vgetq_lane_f64(acc, 0) + vgetq_lane_f64(acc, 1) };
 
-        while i < n {
-            sum += (*a.get_unchecked(i) - *b.get_unchecked(i)).abs();
-            i += 1;
+        for (&a_item, &b_item) in a_chunks.remainder().iter().zip(b_chunks.remainder()) {
+            sum += (a_item - b_item).abs();
         }
         sum
     }
