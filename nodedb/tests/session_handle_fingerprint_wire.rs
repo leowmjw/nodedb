@@ -25,16 +25,13 @@
 mod common;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::time::Duration;
 
-use nodedb::control::security::audit::AuditEvent;
 use nodedb::control::security::auth_context::{AuthContext, generate_session_id};
 use nodedb::control::security::identity::{AuthMethod, AuthenticatedIdentity, Role};
-use nodedb::control::security::session_handle::ClientFingerprint;
 use nodedb::types::TenantId;
 
-use common::pgwire_harness::TestServer;
 
+#[cfg(target_os = "linux")]
 fn nodedb_auth_ctx() -> AuthContext {
     // Matches the harness-provisioned `nodedb` superuser (tenant 1) so the
     // resolver can hand back a context the query path will accept.
@@ -51,6 +48,7 @@ fn nodedb_auth_ctx() -> AuthContext {
     AuthContext::from_identity(&identity, generate_session_id())
 }
 
+#[cfg(target_os = "linux")]
 async fn connect_from(
     local: IpAddr,
     server_port: u16,

@@ -60,6 +60,7 @@ impl BackingStore {
 /// MADV/fadvise calls are skipped since there is no mmap region to advise.
 pub struct ColumnMmap {
     pub(super) backing: BackingStore,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(super) path: PathBuf,
 }
 

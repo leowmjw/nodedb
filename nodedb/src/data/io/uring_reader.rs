@@ -84,7 +84,7 @@ impl UringReader {
         #[cfg(not(target_os = "linux"))]
         {
             let _ = (queue_depth, pool_size, buf_size);
-            return None;
+            None
         }
         #[cfg(target_os = "linux")]
         {
@@ -122,10 +122,10 @@ impl UringReader {
     pub fn read_files(&mut self, paths: &[&Path]) -> Vec<Vec<u8>> {
         #[cfg(not(target_os = "linux"))]
         {
-            return paths
+            paths
                 .iter()
                 .map(|p| std::fs::read(p).unwrap_or_default())
-                .collect();
+                .collect()
         }
 
         #[cfg(target_os = "linux")]
