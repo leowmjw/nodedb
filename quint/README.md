@@ -1,8 +1,9 @@
 # Quint Models
 
 This directory contains executable Quint models for the NodeDB Raft protocol.
-The current model is a small single-voter contract used both for direct Quint
-simulation and for model-based testing through `quint-connect`.
+The current models cover the single-voter core, three-node election, and
+three-node AppendEntries replication. Each model can be simulated directly and
+checked against Rust with `quint-connect`.
 
 ## Day-to-Day Commands
 
@@ -53,6 +54,21 @@ Run the three-node election model against the Rust implementation:
 cargo test -p nodedb-raft election_matches_quint -- --nocapture
 ```
 
+Run the AppendEntries replication model directly:
+
+```sh
+quint run quint/raft/SingleGroupReplication.qnt \
+  --max-samples 500 \
+  --max-steps 20 \
+  --invariants logMatching commitWithinLog appliedWithinCommit commitMonotonic stateMachineSafety
+```
+
+Run the AppendEntries replication model against the Rust implementation:
+
+```sh
+cargo test -p nodedb-raft append_entries_replication_matches_quint -- --nocapture
+```
+
 Run all Raft crate tests, including the Quint-connect test:
 
 ```sh
@@ -64,10 +80,15 @@ cargo test -p nodedb-raft
 - `raft/Core.qnt`: single-node, single-voter model and basic invariants.
 - `raft/SingleGroupElection.qnt`: three-voter election model with in-flight
   `RequestVote` and `RequestVoteResponse` queues.
+- `raft/SingleGroupReplication.qnt`: established three-node leader model with
+  AppendEntries delivery, follower responses, quorum commit advancement,
+  `Ready.committed_entries`, and apply advancement.
 - `../nodedb-raft/src/node/quint_connect_core.rs`: Rust driver for
   `quint-connect`.
 - `../nodedb-raft/src/node/quint_connect_election.rs`: Rust driver for the
   election model.
+- `../nodedb-raft/src/node/quint_connect_replication.rs`: Rust driver for the
+  AppendEntries replication model.
 
 ## Workflow
 
@@ -75,5 +96,5 @@ cargo test -p nodedb-raft
 2. Run `quint typecheck`.
 3. Run `quint run` with the relevant invariants.
 4. Update the Rust `quint-connect` driver if the model state or actions changed.
-5. Run the focused `cargo test -p nodedb-raft single_voter_core_matches_quint -- --nocapture`.
+5. Run the focused `cargo test -p nodedb-raft <model_test_name> -- --nocapture`.
 6. Record intentional source/model differences in `quint/AGENTS.md`.

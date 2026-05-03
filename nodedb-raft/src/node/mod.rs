@@ -21,6 +21,8 @@ pub mod rpc;
 mod quint_connect_core;
 #[cfg(test)]
 mod quint_connect_election;
+#[cfg(test)]
+mod quint_connect_replication;
 
 pub use self::config::RaftConfig;
 pub use self::core::{RaftNode, Ready};
