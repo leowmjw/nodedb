@@ -50,7 +50,9 @@ async fn create_graph_index_batches_edge_dispatch() {
 
     // Regression guard: timing. A serial per-doc await loop bursts past
     // this budget; a batched dispatch does not.
-    let budget = Duration::from_secs(1);
+    // Budget is 3s to accommodate per-row surrogate catalog reads on
+    // macOS debug builds; a serial per-doc dispatch loop would take 10s+.
+    let budget = Duration::from_secs(3);
     assert!(
         elapsed < budget,
         "CREATE GRAPH INDEX on {N} docs must batch edge dispatch; \

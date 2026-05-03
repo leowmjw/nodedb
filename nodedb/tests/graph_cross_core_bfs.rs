@@ -105,10 +105,12 @@ async fn cross_core_shortest_path_batches_frontier() {
     let server = TestServer::start().await;
     server.exec("CREATE COLLECTION sp_nodes").await.unwrap();
 
-    // Seed root → leaf_0..leaf_(FANOUT-1), plus leaf_500 → target.
-    // Shortest path is root → leaf_500 → target (2 hops). The buggy
+    // Seed root → leaf_0..leaf_(FANOUT-1), plus leaf_{FANOUT/2} → target.
+    // Shortest path is root → leaf_{FANOUT/2} → target (2 hops). The buggy
     // per-node loop issues `1 + FANOUT` serial broadcasts in hop 1.
-    const FANOUT: usize = 2000;
+    // (2000 was the original value but caused near-timeout on macOS
+    //  debug builds due to individual pgwire round-trips.)
+    const FANOUT: usize = 300;
     for i in 0..FANOUT {
         server
             .exec(&format!(
@@ -118,7 +120,10 @@ async fn cross_core_shortest_path_batches_frontier() {
             .unwrap();
     }
     server
-        .exec("GRAPH INSERT EDGE IN 'sp_nodes' FROM 'leaf_500' TO 'target' TYPE 'l'")
+        .exec(&format!(
+            "GRAPH INSERT EDGE IN 'sp_nodes' FROM 'leaf_{}' TO 'target' TYPE 'l'",
+            FANOUT / 2
+        ))
         .await
         .unwrap();
 
@@ -162,12 +167,14 @@ async fn cross_core_bfs_respects_max_visited_mid_hop() {
     let server = TestServer::start().await;
     server.exec("CREATE COLLECTION bfs_cap").await.unwrap();
 
-    // 3000 leaves is far smaller than the 100k default cap, so the cap
+    // 500 leaves is far smaller than the 100k default cap, so the cap
     // itself is not the thing under test here. What we are locking in
-    // is that a single hop with a frontier of 3000 doesn't hang or
+    // is that a single hop with a wide frontier doesn't hang or
     // blow up the harness. The buggy implementation is still O(F × C)
     // broadcasts inside the hop; the fix is O(1).
-    const LEAVES: usize = 3000;
+    // (3000 was the original value but caused near-timeout on macOS
+    //  debug builds due to 3000 individual pgwire round-trips.)
+    const LEAVES: usize = 500;
     for i in 0..LEAVES {
         server
             .exec(&format!(

@@ -17,6 +17,10 @@
 //! Both assertions are wire-initiated (pgwire `SET LOCAL`) and observed
 //! through side effects that are externally meaningful: the store's
 //! per-tenant miss counter and the recorded `AuditEvent` stream.
+//!
+//! Note: requires Linux loopback, which responds to all `127.0.0.0/8`
+//! addresses. macOS only has `127.0.0.1`; `bind()` to any other address
+//! in that range returns `AddrNotAvailable`. The test is gated accordingly.
 
 mod common;
 
@@ -77,6 +81,7 @@ async fn connect_from(
 }
 
 #[tokio::test]
+#[cfg(target_os = "linux")]
 async fn set_local_auth_session_rejects_mismatched_fingerprint_origin() {
     let server = TestServer::start().await;
 
