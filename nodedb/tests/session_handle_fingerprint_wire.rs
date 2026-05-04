@@ -24,10 +24,14 @@
 
 mod common;
 
+#[cfg(target_os = "linux")]
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+#[cfg(target_os = "linux")]
 use nodedb::control::security::auth_context::{AuthContext, generate_session_id};
+#[cfg(target_os = "linux")]
 use nodedb::control::security::identity::{AuthMethod, AuthenticatedIdentity, Role};
+#[cfg(target_os = "linux")]
 use nodedb::types::TenantId;
 
 
