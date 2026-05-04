@@ -25,6 +25,10 @@ mod quint_connect_election;
 mod quint_connect_learners;
 #[cfg(test)]
 mod quint_connect_replication;
+#[cfg(test)]
+mod quint_connect_snapshots;
+#[cfg(test)]
+mod quint_connect_restart;
 
 pub use self::config::RaftConfig;
 pub use self::core::{RaftNode, Ready};

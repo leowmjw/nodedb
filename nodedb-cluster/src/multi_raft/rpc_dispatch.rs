@@ -25,7 +25,9 @@ impl MultiRaft {
             .ok_or(ClusterError::GroupNotFound {
                 group_id: req.group_id,
             })?;
-        Ok(node.handle_append_entries(req))
+        let resp = node.handle_append_entries(req);
+        node.persist_ready_hard_state()?;
+        Ok(resp)
     }
 
     /// Route a RequestVote RPC to the correct group.
@@ -36,7 +38,9 @@ impl MultiRaft {
             .ok_or(ClusterError::GroupNotFound {
                 group_id: req.group_id,
             })?;
-        Ok(node.handle_request_vote(req))
+        let resp = node.handle_request_vote(req);
+        node.persist_ready_hard_state()?;
+        Ok(resp)
     }
 
     /// Route an InstallSnapshot RPC to the correct group.
@@ -50,7 +54,9 @@ impl MultiRaft {
             .ok_or(ClusterError::GroupNotFound {
                 group_id: req.group_id,
             })?;
-        Ok(node.handle_install_snapshot(req))
+        let resp = node.handle_install_snapshot(req);
+        node.persist_ready_hard_state()?;
+        Ok(resp)
     }
 
     /// Get the current term and snapshot metadata for a group (for building
@@ -79,6 +85,7 @@ impl MultiRaft {
             .get_mut(&group_id)
             .ok_or(ClusterError::GroupNotFound { group_id })?;
         node.handle_append_entries_response(peer, resp);
+        node.persist_ready_hard_state()?;
         Ok(())
     }
 
@@ -94,6 +101,7 @@ impl MultiRaft {
             .get_mut(&group_id)
             .ok_or(ClusterError::GroupNotFound { group_id })?;
         node.handle_request_vote_response(peer, resp);
+        node.persist_ready_hard_state()?;
         Ok(())
     }
 

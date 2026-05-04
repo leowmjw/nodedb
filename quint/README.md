@@ -2,8 +2,9 @@
 
 This directory contains executable Quint models for the NodeDB Raft protocol.
 The current models cover the single-voter core, three-node election,
-three-node AppendEntries replication, and learner/membership behavior. Each
-model can be simulated directly and checked against Rust with `quint-connect`.
+three-node AppendEntries replication, learner/membership behavior, and the
+snapshot catch-up and restart/persistence paths. Each model can be simulated
+directly and checked against Rust with `quint-connect`.
 
 ## Day-to-Day Commands
 
@@ -84,6 +85,36 @@ Run the learner/membership model against the Rust implementation:
 cargo test -p nodedb-raft learners_and_membership_matches_quint -- --nocapture
 ```
 
+Run the snapshot model directly:
+
+```sh
+quint run quint/raft/Snapshots.qnt \
+  --max-samples 500 \
+  --max-steps 12 \
+  --invariants snapshotNeededForLaggingPeer leaderSnapshotBoundaryValid followerSnapshotBoundaryValid followerCommitAppliedFollowSnapshot postSnapshotLogAfterBoundary
+```
+
+Run the snapshot model against the Rust implementation:
+
+```sh
+cargo test -p nodedb-raft snapshots_match_quint -- --nocapture
+```
+
+Run the restart/persistence model directly:
+
+```sh
+quint run quint/raft/RestartPersistence.qnt \
+  --max-samples 500 \
+  --max-steps 14 \
+  --invariants restoredHardStateMatchesStorage snapshotAndLogPersisted restartedVolatileReset secondCandidateNotGranted
+```
+
+Run the restart/persistence model against the Rust implementation:
+
+```sh
+cargo test -p nodedb-raft restart_persistence_matches_quint -- --nocapture
+```
+
 Run all Raft crate tests, including the Quint-connect tests:
 
 ```sh
@@ -102,6 +133,12 @@ cargo test -p nodedb-raft
 - `raft/Learners.qnt`: focused learner/membership model with `AddLearner`,
   learner replication, learner vote/election exclusion, learner ACK exclusion
   from quorum, safe `PromoteLearner`, and local `PromoteSelf`.
+- `raft/Snapshots.qnt`: focused snapshot catch-up model with compacted leader
+  log boundary, `snapshots_needed`, `InstallSnapshot`, and follower
+  commit/applied advancement after snapshot apply.
+- `raft/RestartPersistence.qnt`: focused restart model with persisted
+  `currentTerm`/`votedFor`, post-snapshot log restore, and same-term
+  no-double-vote after restart.
 - `../nodedb-raft/src/node/quint_connect_core.rs`: Rust driver for
   `quint-connect`.
 - `../nodedb-raft/src/node/quint_connect_election.rs`: Rust driver for the
@@ -110,6 +147,10 @@ cargo test -p nodedb-raft
   AppendEntries replication model.
 - `../nodedb-raft/src/node/quint_connect_learners.rs`: Rust driver for the
   learner/membership model.
+- `../nodedb-raft/src/node/quint_connect_snapshots.rs`: Rust driver for the
+  snapshot catch-up model.
+- `../nodedb-raft/src/node/quint_connect_restart.rs`: Rust driver for the
+  restart/persistence model.
 
 ## Workflow
 

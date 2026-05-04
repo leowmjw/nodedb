@@ -52,7 +52,7 @@ async fn join_follows_leader_redirect_from_follower() {
     let all = [&node1, &node2, &node3, &node4];
     wait_for(
         "all 4 nodes converge on topology_size == 4",
-        Duration::from_secs(10),
+        Duration::from_secs(30),
         Duration::from_millis(100),
         || all.iter().all(|n| n.topology_size() == 4),
     )

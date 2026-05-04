@@ -128,6 +128,10 @@ impl<S: LogStorage> RaftNode<S> {
         self.hard_state.current_term
     }
 
+    pub fn voted_for(&self) -> u64 {
+        self.hard_state.voted_for
+    }
+
     pub fn commit_index(&self) -> u64 {
         self.volatile.commit_index
     }
@@ -166,6 +170,14 @@ impl<S: LogStorage> RaftNode<S> {
 
     pub fn log_snapshot_term(&self) -> u64 {
         self.log.snapshot_term()
+    }
+
+    /// Persist the current pending hard state, if any, into storage.
+    pub fn persist_ready_hard_state(&mut self) -> Result<()> {
+        if let Some(hard_state) = self.ready.hard_state.clone() {
+            self.log.storage_mut().save_hard_state(&hard_state)?;
+        }
+        Ok(())
     }
 
     /// Current voter peer list (excluding self).
@@ -381,5 +393,88 @@ mod tests {
         node.tick();
         assert_eq!(node.role(), NodeRole::Learner);
         assert_eq!(node.current_term(), 0);
+    }
+
+    #[test]
+    fn restore_recovers_persisted_hard_state_and_snapshot_log() {
+        let config = test_config(1, vec![]);
+        let mut node = RaftNode::new(config.clone(), MemStorage::new());
+        node.restore().unwrap();
+
+        node.hard_state.current_term = 4;
+        node.hard_state.voted_for = 2;
+        node.persist_hard_state();
+        node.persist_ready_hard_state().unwrap();
+
+        node.log
+            .append(LogEntry {
+                term: 3,
+                index: 1,
+                data: b"a".to_vec(),
+            })
+            .unwrap();
+        node.log
+            .append(LogEntry {
+                term: 4,
+                index: 2,
+                data: b"b".to_vec(),
+            })
+            .unwrap();
+        node.log
+            .append(LogEntry {
+                term: 4,
+                index: 3,
+                data: b"c".to_vec(),
+            })
+            .unwrap();
+        node.log.apply_snapshot(2, 4);
+
+        let storage = node.log.storage().clone();
+        let mut restored = RaftNode::new(config, storage);
+        restored.restore().unwrap();
+
+        assert_eq!(restored.current_term(), 4);
+        assert_eq!(restored.voted_for(), 2);
+        assert_eq!(restored.log_snapshot_index(), 2);
+        assert_eq!(restored.log_snapshot_term(), 4);
+        assert_eq!(restored.log.last_index(), 3);
+        assert_eq!(restored.log.last_term(), 4);
+        let entries = restored.log.entries_range(3, 3).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].data, b"c");
+    }
+
+    #[test]
+    fn restored_node_does_not_vote_twice_in_same_term() {
+        use crate::message::RequestVoteRequest;
+
+        let config = test_config(1, vec![2, 3]);
+        let mut node = RaftNode::new(config.clone(), MemStorage::new());
+        node.restore().unwrap();
+
+        let first = node.handle_request_vote(&RequestVoteRequest {
+            term: 5,
+            candidate_id: 2,
+            last_log_index: 0,
+            last_log_term: 0,
+            group_id: 1,
+        });
+        assert!(first.vote_granted);
+        node.persist_ready_hard_state().unwrap();
+
+        let storage = node.log.storage().clone();
+        let mut restored = RaftNode::new(config, storage);
+        restored.restore().unwrap();
+
+        let second = restored.handle_request_vote(&RequestVoteRequest {
+            term: 5,
+            candidate_id: 3,
+            last_log_index: 0,
+            last_log_term: 0,
+            group_id: 1,
+        });
+        assert!(!second.vote_granted);
+        assert_eq!(restored.current_term(), 5);
+        assert_eq!(restored.voted_for(), 2);
     }
 }

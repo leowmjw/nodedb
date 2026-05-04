@@ -144,7 +144,10 @@ impl MultiRaft {
         let storage = RedbLogStorage::open(&storage_path).map_err(|e| ClusterError::Transport {
             detail: format!("failed to open raft storage for group {group_id}: {e}"),
         })?;
-        let node = RaftNode::new(config, storage);
+        let mut node = RaftNode::new(config, storage);
+        node.restore().map_err(|e| ClusterError::Transport {
+            detail: format!("failed to restore raft group {group_id}: {e}"),
+        })?;
         self.groups.insert(group_id, node);
 
         info!(
@@ -163,6 +166,9 @@ impl MultiRaft {
 
         for (&group_id, node) in &mut self.groups {
             node.tick();
+            if let Err(e) = node.persist_ready_hard_state() {
+                tracing::warn!(group_id, error = %e, "failed to persist raft hard state");
+            }
             let r = node.take_ready();
             if !r.is_empty() {
                 ready.groups.push((group_id, r));
@@ -323,5 +329,26 @@ mod tests {
         let node = mr.groups.get(&1).unwrap();
         assert_eq!(node.role(), NodeRole::Learner);
         assert_eq!(node.voters(), &[1]);
+    }
+
+    #[test]
+    fn reopened_group_restores_persisted_hard_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let rt = RoutingTable::uniform(1, &[1], 1);
+
+        let mut mr = MultiRaft::new(1, rt.clone(), dir.path().to_path_buf());
+        mr.add_group(0, vec![]).unwrap();
+        mr.groups
+            .get_mut(&0)
+            .unwrap()
+            .election_deadline_override(Instant::now() - Duration::from_millis(1));
+        let _ = mr.tick();
+        drop(mr);
+
+        let mut reopened = MultiRaft::new(1, rt, dir.path().to_path_buf());
+        reopened.add_group(0, vec![]).unwrap();
+        let node = reopened.groups.get(&0).unwrap();
+        assert_eq!(node.current_term(), 1);
+        assert_eq!(node.voted_for(), 1);
     }
 }

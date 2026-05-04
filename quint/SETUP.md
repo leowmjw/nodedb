@@ -220,6 +220,20 @@ quint run quint/raft/Learners.qnt \
   --invariants learnerExcludedFromQuorum learnerCannotLead learnerDoesNotVote learnerAckDoesNotCommit promotionOnlyAfterCatchUp logMatching
 
 cargo test -p nodedb-raft learners_and_membership_matches_quint -- --nocapture
+
+quint run quint/raft/Snapshots.qnt \
+  --max-samples 500 \
+  --max-steps 12 \
+  --invariants snapshotNeededForLaggingPeer leaderSnapshotBoundaryValid followerSnapshotBoundaryValid followerCommitAppliedFollowSnapshot postSnapshotLogAfterBoundary
+
+cargo test -p nodedb-raft snapshots_match_quint -- --nocapture
+
+quint run quint/raft/RestartPersistence.qnt \
+  --max-samples 500 \
+  --max-steps 14 \
+  --invariants restoredHardStateMatchesStorage snapshotAndLogPersisted restartedVolatileReset secondCandidateNotGranted
+
+cargo test -p nodedb-raft restart_persistence_matches_quint -- --nocapture
 ```
 
 The Overmind scenario is for end-to-end implementation behavior. The

@@ -446,6 +446,40 @@ mod tests {
     }
 
     #[test]
+    fn install_snapshot_applies_boundary_and_advances_apply_state() {
+        let config = test_config(2, vec![1]);
+        let mut node = RaftNode::new(config, MemStorage::new());
+        node.hard_state.current_term = 1;
+        node.log
+            .append(LogEntry {
+                term: 1,
+                index: 1,
+                data: b"x".to_vec(),
+            })
+            .unwrap();
+
+        let req = InstallSnapshotRequest {
+            term: 2,
+            leader_id: 1,
+            last_included_index: 5,
+            last_included_term: 2,
+            offset: 0,
+            data: Vec::new(),
+            done: true,
+            group_id: 1,
+        };
+
+        let resp = node.handle_install_snapshot(&req);
+        assert_eq!(resp.term, 2);
+        assert_eq!(node.current_term(), 2);
+        assert_eq!(node.leader_id(), 1);
+        assert_eq!(node.log_snapshot_index(), 5);
+        assert_eq!(node.log_snapshot_term(), 2);
+        assert_eq!(node.commit_index(), 5);
+        assert_eq!(node.last_applied(), 5);
+    }
+
+    #[test]
     fn three_node_election() {
         let config1 = test_config(1, vec![2, 3]);
         let config2 = test_config(2, vec![1, 3]);

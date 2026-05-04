@@ -30,7 +30,7 @@ pub trait LogStorage: Send {
 }
 
 /// In-memory storage for testing.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MemStorage {
     entries: Vec<LogEntry>,
     hard_state: HardState,
