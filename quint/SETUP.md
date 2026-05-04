@@ -209,15 +209,22 @@ cargo test -p nodedb-raft election_matches_quint -- --nocapture
 
 quint run quint/raft/SingleGroupReplication.qnt \
   --max-samples 500 \
-  --max-steps 24 \
+  --max-steps 30 \
   --invariants logMatching commitWithinLog appliedWithinCommit commitMonotonic stateMachineSafety
 
 cargo test -p nodedb-raft append_entries_replication_matches_quint -- --nocapture
+
+quint run quint/raft/Learners.qnt \
+  --max-samples 500 \
+  --max-steps 24 \
+  --invariants learnerExcludedFromQuorum learnerCannotLead learnerDoesNotVote learnerAckDoesNotCommit promotionOnlyAfterCatchUp logMatching
+
+cargo test -p nodedb-raft learners_and_membership_matches_quint -- --nocapture
 ```
 
 The Overmind scenario is for end-to-end implementation behavior. The
 quint-connect tests are still the precise executable contract.
 
-For day-to-day replication work, run the direct Quint command first. If it is
-green, run the focused Rust connector. Use `cargo test -p nodedb-raft` before
-handing off changes that touched shared Raft behavior.
+For day-to-day model work, run the direct Quint command first. If it is green,
+run the focused Rust connector. Use `cargo test -p nodedb-raft` before handing
+off changes that touched shared Raft behavior.

@@ -12,6 +12,9 @@ No. The current Quint model covers the first happy-path core slices, but not all
   - Rust alignment via three quint-connect drivers.
   - Fixed/covered Ready.committed_entries pending-buffer semantics with ready_commit_index.
   - Covered stale RequestVoteResponse ignoring via the election driver/model.
+  - Covered learners and membership with a focused model: AddLearner,
+    learner replication, learner vote/election exclusion, learner ACK
+    exclusion from quorum, safe PromoteLearner, and local PromoteSelf.
 
 
 Not Yet Covered
@@ -32,10 +35,6 @@ Not Yet Covered
   - Current-term-only commit advancement under mixed-term logs:
       - Rust enforces it: nodedb-raft/src/node/internal.rs:176
       - current model has only term-1 entries, so it does not really test old-term commit safety.
-  - Learners and membership:
-      - add/remove voters, add/remove learners, promote learner, promote self: nodedb-raft/src/node/
-        membership.rs:16
-      - learner receives replication, never votes, never starts election, never counts for quorum.
   - Snapshot path:
       - snapshot-needed output when leader log is compacted.
       - InstallSnapshot handling and snapshot boundary state: nodedb-raft/src/node/rpc.rs:191
@@ -50,6 +49,6 @@ Not Yet Covered
   2. Stale/lower-term AppendEntriesResponse check.
   3. Heartbeat commit propagation.
   4. Mixed-term log commit rule.
-  5. Learners and membership.
+  5. Learners and membership. (done)
   6. Snapshots.
   7. Restart/persistence.

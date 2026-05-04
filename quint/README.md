@@ -1,9 +1,9 @@
 # Quint Models
 
 This directory contains executable Quint models for the NodeDB Raft protocol.
-The current models cover the single-voter core, three-node election, and
-three-node AppendEntries replication. Each model can be simulated directly and
-checked against Rust with `quint-connect`.
+The current models cover the single-voter core, three-node election,
+three-node AppendEntries replication, and learner/membership behavior. Each
+model can be simulated directly and checked against Rust with `quint-connect`.
 
 ## Day-to-Day Commands
 
@@ -59,7 +59,7 @@ Run the AppendEntries replication model directly:
 ```sh
 quint run quint/raft/SingleGroupReplication.qnt \
   --max-samples 500 \
-  --max-steps 24 \
+  --max-steps 30 \
   --invariants logMatching commitWithinLog appliedWithinCommit commitMonotonic stateMachineSafety
 ```
 
@@ -69,7 +69,22 @@ Run the AppendEntries replication model against the Rust implementation:
 cargo test -p nodedb-raft append_entries_replication_matches_quint -- --nocapture
 ```
 
-Run all Raft crate tests, including the Quint-connect test:
+Run the learner/membership model directly:
+
+```sh
+quint run quint/raft/Learners.qnt \
+  --max-samples 500 \
+  --max-steps 24 \
+  --invariants learnerExcludedFromQuorum learnerCannotLead learnerDoesNotVote learnerAckDoesNotCommit promotionOnlyAfterCatchUp logMatching
+```
+
+Run the learner/membership model against the Rust implementation:
+
+```sh
+cargo test -p nodedb-raft learners_and_membership_matches_quint -- --nocapture
+```
+
+Run all Raft crate tests, including the Quint-connect tests:
 
 ```sh
 cargo test -p nodedb-raft
@@ -82,14 +97,19 @@ cargo test -p nodedb-raft
   `RequestVote` and `RequestVoteResponse` queues.
 - `raft/SingleGroupReplication.qnt`: established three-node leader model with
   AppendEntries rejection, conflict repair, stale response filtering, follower
-  responses, quorum commit advancement, `Ready.committed_entries`, and apply
-  advancement.
+  responses, quorum-wide current-term-only commit advancement, heartbeat
+  commit propagation, `Ready.committed_entries`, and apply advancement.
+- `raft/Learners.qnt`: focused learner/membership model with `AddLearner`,
+  learner replication, learner vote/election exclusion, learner ACK exclusion
+  from quorum, safe `PromoteLearner`, and local `PromoteSelf`.
 - `../nodedb-raft/src/node/quint_connect_core.rs`: Rust driver for
   `quint-connect`.
 - `../nodedb-raft/src/node/quint_connect_election.rs`: Rust driver for the
   election model.
 - `../nodedb-raft/src/node/quint_connect_replication.rs`: Rust driver for the
   AppendEntries replication model.
+- `../nodedb-raft/src/node/quint_connect_learners.rs`: Rust driver for the
+  learner/membership model.
 
 ## Workflow
 

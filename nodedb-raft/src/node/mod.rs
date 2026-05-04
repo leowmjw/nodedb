@@ -22,6 +22,8 @@ mod quint_connect_core;
 #[cfg(test)]
 mod quint_connect_election;
 #[cfg(test)]
+mod quint_connect_learners;
+#[cfg(test)]
 mod quint_connect_replication;
 
 pub use self::config::RaftConfig;

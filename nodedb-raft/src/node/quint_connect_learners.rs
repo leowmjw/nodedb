@@ -1,14 +1,16 @@
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use quint_connect::{Driver, Result, State, Step, quint_run, switch};
 use serde::Deserialize;
 
-use crate::message::{AppendEntriesRequest, AppendEntriesResponse, LogEntry};
+use crate::message::{
+    AppendEntriesRequest, AppendEntriesResponse, LogEntry, RequestVoteRequest,
+};
 use crate::node::config::RaftConfig;
 use crate::node::core::RaftNode;
 use crate::state::{LeaderState, NodeRole};
-use crate::storage::{LogStorage, MemStorage};
+use crate::storage::MemStorage;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,12 +71,6 @@ struct ModelState {
     commit_index1: i64,
     commit_index2: i64,
     commit_index3: i64,
-    last_applied1: i64,
-    last_applied2: i64,
-    last_applied3: i64,
-    ready_commit_index1: i64,
-    ready_commit_index2: i64,
-    ready_commit_index3: i64,
     log1: Vec<ModelLogEntry>,
     log2: Vec<ModelLogEntry>,
     log3: Vec<ModelLogEntry>,
@@ -82,43 +78,44 @@ struct ModelState {
     next_index3: i64,
     match_index2: i64,
     match_index3: i64,
+    learner3: bool,
+    voter3: bool,
+    starts_as_learner3: bool,
+    learner_vote_granted: bool,
     append_messages: Vec<ModelAppendEnvelope>,
     append_responses: Vec<ModelAppendResponseEnvelope>,
-    ready_committed1: Vec<ModelLogEntry>,
-    ready_committed2: Vec<ModelLogEntry>,
-    ready_committed3: Vec<ModelLogEntry>,
 }
 
 #[derive(Default)]
-struct ReplicationDriver {
+struct LearnerDriver {
     nodes: HashMap<u64, RaftNode<MemStorage>>,
     append_messages: Vec<ModelAppendEnvelope>,
     append_responses: Vec<ModelAppendResponseEnvelope>,
+    learner_vote_granted: bool,
 }
 
-impl Driver for ReplicationDriver {
+impl Driver for LearnerDriver {
     type State = ModelState;
 
     fn step(&mut self, step: &Step) -> Result {
         switch!(step {
             init => self.init()?,
-            ClientPropose(data) => self.client_propose(data)?,
+            AddLearner => self.add_learner()?,
+            ClientPropose => self.client_propose()?,
             TickHeartbeat => self.tick_heartbeat()?,
             HandleAppendEntries => self.handle_append_entries()?,
             HandleAppendEntriesResponse => self.handle_append_entries_response()?,
-            InjectStaleAppendEntriesResponse => self.inject_stale_append_entries_response()?,
-            InjectOldTermEntryAppendEntriesResponse => {
-                self.inject_old_term_entry_append_entries_response()?
-            },
-            TakeReady(n) => self.take_ready(n)?,
-            AdvanceApplied(n) => self.advance_applied(n)?,
+            RequestVoteAtLearner => self.request_vote_at_learner()?,
+            TickLearnerElectionTimeout => self.tick_learner_election_timeout()?,
+            PromoteLearner => self.promote_learner()?,
+            PromoteSelf => self.promote_self()?,
             Noop => (),
         })
     }
 }
 
-impl State<ReplicationDriver> for ModelState {
-    fn from_driver(driver: &ReplicationDriver) -> Result<Self> {
+impl State<LearnerDriver> for ModelState {
+    fn from_driver(driver: &LearnerDriver) -> Result<Self> {
         let n1 = driver.node(1)?;
         let n2 = driver.node(2)?;
         let n3 = driver.node(3)?;
@@ -136,12 +133,6 @@ impl State<ReplicationDriver> for ModelState {
             commit_index1: n1.volatile.commit_index as i64,
             commit_index2: n2.volatile.commit_index as i64,
             commit_index3: n3.volatile.commit_index as i64,
-            last_applied1: n1.volatile.last_applied as i64,
-            last_applied2: n2.volatile.last_applied as i64,
-            last_applied3: n3.volatile.last_applied as i64,
-            ready_commit_index1: n1.ready_commit_index as i64,
-            ready_commit_index2: n2.ready_commit_index as i64,
-            ready_commit_index3: n3.ready_commit_index as i64,
             log1: model_log(n1)?,
             log2: model_log(n2)?,
             log3: model_log(n3)?,
@@ -149,20 +140,22 @@ impl State<ReplicationDriver> for ModelState {
             next_index3: next_index(n1, 3) as i64,
             match_index2: match_index(n1, 2) as i64,
             match_index3: match_index(n1, 3) as i64,
+            learner3: n1.learners().contains(&3),
+            voter3: n1.voters().contains(&3),
+            starts_as_learner3: n3.config.starts_as_learner,
+            learner_vote_granted: driver.learner_vote_granted,
             append_messages: driver.append_messages.clone(),
             append_responses: driver.append_responses.clone(),
-            ready_committed1: n1.ready.committed_entries.iter().map(model_entry).collect(),
-            ready_committed2: n2.ready.committed_entries.iter().map(model_entry).collect(),
-            ready_committed3: n3.ready.committed_entries.iter().map(model_entry).collect(),
         })
     }
 }
 
-impl ReplicationDriver {
+impl LearnerDriver {
     fn init(&mut self) -> Result {
         self.nodes.clear();
         self.append_messages.clear();
         self.append_responses.clear();
+        self.learner_vote_granted = false;
 
         for node_id in [1, 2, 3] {
             let mut node = RaftNode::new(config(node_id), MemStorage::new());
@@ -170,46 +163,46 @@ impl ReplicationDriver {
             self.nodes.insert(node_id, node);
         }
 
+        let noop = LogEntry {
+            term: 1,
+            index: 1,
+            data: Vec::new(),
+        };
+
         let leader = self.node_mut(1)?;
         leader.role = NodeRole::Leader;
-        leader.hard_state.current_term = 3;
+        leader.hard_state.current_term = 1;
         leader.hard_state.voted_for = 1;
         leader.leader_id = 1;
-        leader.leader_state = Some(LeaderState::new(&[2, 3], 2));
-        leader.log.append(LogEntry {
-            term: 1,
-            index: 1,
-            data: Vec::new(),
-        })?;
-        leader.log.append(LogEntry {
-            term: 3,
-            index: 2,
-            data: vec![1],
-        })?;
+        leader.volatile.commit_index = 1;
+        leader.ready_commit_index = 1;
+        leader.leader_state = Some(LeaderState::new(&[2], 1));
+        leader.log.append(noop.clone())?;
         if let Some(leader_state) = leader.leader_state.as_mut() {
-            leader_state.set_next_index(3, 1);
+            leader_state.set_match_index(2, 1);
+            leader_state.set_next_index(2, 2);
         }
-        leader.replicate_to_all();
-        self.drain_append_messages(1);
 
-        let follower = self.node_mut(2)?;
-        follower.hard_state.current_term = 2;
-        follower.log.append(LogEntry {
-            term: 1,
-            index: 1,
-            data: Vec::new(),
-        })?;
-        follower.log.append(LogEntry {
-            term: 2,
-            index: 2,
-            data: vec![2],
-        })?;
+        let voter = self.node_mut(2)?;
+        voter.hard_state.current_term = 1;
+        voter.leader_id = 1;
+        voter.volatile.commit_index = 1;
+        voter.ready_commit_index = 1;
+        voter.log.append(noop)?;
+
+        let learner = self.node_mut(3)?;
+        learner.hard_state.current_term = 1;
 
         Ok(())
     }
 
-    fn client_propose(&mut self, data: i64) -> Result {
-        self.node_mut(1)?.propose(vec![data as u8])?;
+    fn add_learner(&mut self) -> Result {
+        self.node_mut(1)?.add_learner(3);
+        Ok(())
+    }
+
+    fn client_propose(&mut self) -> Result {
+        self.node_mut(1)?.propose(vec![7])?;
         self.drain_append_messages(1);
         Ok(())
     }
@@ -245,48 +238,33 @@ impl ReplicationDriver {
         Ok(())
     }
 
-    fn inject_stale_append_entries_response(&mut self) -> Result {
-        let leader = self.node(1)?;
-        self.append_responses.push(ModelAppendResponseEnvelope {
-            src: 2,
-            dst: 1,
-            resp: ModelAppendEntriesResponse {
-                term: leader.hard_state.current_term.saturating_sub(1) as i64,
-                success: true,
-                last_log_index: leader.log.last_index() as i64,
-            },
-        });
+    fn request_vote_at_learner(&mut self) -> Result {
+        let req = RequestVoteRequest {
+            term: self.node(3)?.hard_state.current_term + 1,
+            candidate_id: 2,
+            last_log_index: 10,
+            last_log_term: 10,
+            group_id: 1,
+        };
+        let resp = self.node_mut(3)?.handle_request_vote(&req);
+        self.learner_vote_granted = resp.vote_granted;
         Ok(())
     }
 
-    fn inject_old_term_entry_append_entries_response(&mut self) -> Result {
-        let leader = self.node(1)?;
-        self.append_responses.push(ModelAppendResponseEnvelope {
-            src: 2,
-            dst: 1,
-            resp: ModelAppendEntriesResponse {
-                term: leader.hard_state.current_term as i64,
-                success: true,
-                last_log_index: 1,
-            },
-        });
+    fn tick_learner_election_timeout(&mut self) -> Result {
+        let learner = self.node_mut(3)?;
+        learner.election_deadline_override(Instant::now() - Duration::from_millis(1));
+        learner.tick();
         Ok(())
     }
 
-    fn take_ready(&mut self, n: i64) -> Result {
-        let ready = self.node_mut(n as u64)?.take_ready();
-        if let Some(hard_state) = ready.hard_state {
-            self.node_mut(n as u64)?
-                .log
-                .storage_mut()
-                .save_hard_state(&hard_state)?;
-        }
+    fn promote_learner(&mut self) -> Result {
+        self.node_mut(1)?.promote_learner(3);
         Ok(())
     }
 
-    fn advance_applied(&mut self, n: i64) -> Result {
-        let node = self.node_mut(n as u64)?;
-        node.advance_applied(node.commit_index());
+    fn promote_self(&mut self) -> Result {
+        self.node_mut(3)?.promote_self_to_voter();
         Ok(())
     }
 
@@ -315,14 +293,17 @@ impl ReplicationDriver {
 }
 
 fn config(node_id: u64) -> RaftConfig {
-    let peers = [1, 2, 3].into_iter().filter(|id| *id != node_id).collect();
-
     RaftConfig {
         node_id,
         group_id: 1,
-        peers,
+        peers: match node_id {
+            1 => vec![2],
+            2 => vec![1],
+            3 => vec![1, 2],
+            _ => vec![],
+        },
         learners: vec![],
-        starts_as_learner: false,
+        starts_as_learner: node_id == 3,
         election_timeout_min: Duration::from_millis(150),
         election_timeout_max: Duration::from_millis(300),
         heartbeat_interval: Duration::from_millis(50),
@@ -422,11 +403,7 @@ fn model_role(role: NodeRole) -> String {
     .to_string()
 }
 
-#[quint_run(
-    spec = "../quint/raft/SingleGroupReplication.qnt",
-    max_steps = 30,
-    max_samples = 100
-)]
-fn append_entries_replication_matches_quint() -> impl Driver {
-    ReplicationDriver::default()
+#[quint_run(spec = "../quint/raft/Learners.qnt", max_steps = 24, max_samples = 100)]
+fn learners_and_membership_matches_quint() -> impl Driver {
+    LearnerDriver::default()
 }

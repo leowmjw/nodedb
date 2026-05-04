@@ -189,9 +189,19 @@ module SingleGroupReplication {
       maxInt(currentNextIndex - 1, 1)
     }
 
-  pure def commitWithAck(peer, lastLogIndex, currentCommit) =
-    if (lastLogIndex > currentCommit) {
-      lastLogIndex
+  def effectiveMatch(peer, ackPeer, ackMatch) =
+    if (peer == ackPeer) ackMatch else matchIndexOf(peer)
+
+  def peerQuorumHas(index, ackPeer, ackMatch) =
+    effectiveMatch(2, ackPeer, ackMatch) >= index or effectiveMatch(3, ackPeer, ackMatch) >= index
+
+  def commitWithAck(peer, ackMatch, currentCommit) =
+    if (log1.length() >= 3 and 3 > currentCommit and termAt(log1, 3) == currentTerm1 and peerQuorumHas(3, peer, ackMatch)) {
+      3
+    } else if (log1.length() >= 2 and 2 > currentCommit and termAt(log1, 2) == currentTerm1 and peerQuorumHas(2, peer, ackMatch)) {
+      2
+    } else if (log1.length() >= 1 and 1 > currentCommit and termAt(log1, 1) == currentTerm1 and peerQuorumHas(1, peer, ackMatch)) {
+      1
     } else {
       currentCommit
     }
@@ -296,6 +306,40 @@ module SingleGroupReplication {
     }
   }
 
+  action TickHeartbeat = all {
+    role1 == "Leader",
+    role1' = role1,
+    role2' = role2,
+    role3' = role3,
+    currentTerm1' = currentTerm1,
+    currentTerm2' = currentTerm2,
+    currentTerm3' = currentTerm3,
+    leaderId1' = leaderId1,
+    leaderId2' = leaderId2,
+    leaderId3' = leaderId3,
+    commitIndex1' = commitIndex1,
+    commitIndex2' = commitIndex2,
+    commitIndex3' = commitIndex3,
+    lastApplied1' = lastApplied1,
+    lastApplied2' = lastApplied2,
+    lastApplied3' = lastApplied3,
+    readyCommitIndex1' = readyCommitIndex1,
+    readyCommitIndex2' = readyCommitIndex2,
+    readyCommitIndex3' = readyCommitIndex3,
+    log1' = log1,
+    log2' = log2,
+    log3' = log3,
+    nextIndex2' = nextIndex2,
+    nextIndex3' = nextIndex3,
+    matchIndex2' = matchIndex2,
+    matchIndex3' = matchIndex3,
+    appendMessages' = appendMessages.concat(List(leaderAppendReq(2), leaderAppendReq(3))),
+    appendResponses' = appendResponses,
+    readyCommitted1' = readyCommitted1,
+    readyCommitted2' = readyCommitted2,
+    readyCommitted3' = readyCommitted3,
+  }
+
   action HandleAppendEntries = {
     val msg = appendMessages[0]
     val dstLog = logOf(msg.dst)
@@ -348,8 +392,9 @@ module SingleGroupReplication {
   action HandleAppendEntriesResponse = {
     val msg = appendResponses[0]
     val stale = msg.resp.term < currentTerm1
-    val newMatch = if (not(stale) and msg.resp.success) msg.resp.lastLogIndex else matchIndexOf(msg.src)
-    val newCommit = if (not(stale) and msg.resp.success) commitWithAck(msg.src, msg.resp.lastLogIndex, commitIndex1) else commitIndex1
+    val advancesMatch = not(stale) and msg.resp.success and msg.resp.lastLogIndex > matchIndexOf(msg.src)
+    val newMatch = if (advancesMatch) msg.resp.lastLogIndex else matchIndexOf(msg.src)
+    val newCommit = if (not(stale) and msg.resp.success) commitWithAck(msg.src, newMatch, commitIndex1) else commitIndex1
     val retryNext = retryNextIndex(msg.resp.lastLogIndex, nextIndexOf(msg.src))
     all {
       appendResponses.length() > 0,
@@ -374,10 +419,10 @@ module SingleGroupReplication {
       log1' = log1,
       log2' = log2,
       log3' = log3,
-      nextIndex2' = if (not(stale) and msg.src == 2 and msg.resp.success) newMatch + 1 else if (not(stale) and msg.src == 2 and not(msg.resp.success)) retryNext else nextIndex2,
-      nextIndex3' = if (not(stale) and msg.src == 3 and msg.resp.success) newMatch + 1 else if (not(stale) and msg.src == 3 and not(msg.resp.success)) retryNext else nextIndex3,
-      matchIndex2' = if (not(stale) and msg.src == 2 and msg.resp.success) newMatch else matchIndex2,
-      matchIndex3' = if (not(stale) and msg.src == 3 and msg.resp.success) newMatch else matchIndex3,
+      nextIndex2' = if (msg.src == 2 and advancesMatch) newMatch + 1 else if (not(stale) and msg.src == 2 and not(msg.resp.success)) retryNext else nextIndex2,
+      nextIndex3' = if (msg.src == 3 and advancesMatch) newMatch + 1 else if (not(stale) and msg.src == 3 and not(msg.resp.success)) retryNext else nextIndex3,
+      matchIndex2' = if (msg.src == 2 and advancesMatch) newMatch else matchIndex2,
+      matchIndex3' = if (msg.src == 3 and advancesMatch) newMatch else matchIndex3,
       appendMessages' = if (stale or msg.resp.success) appendMessages else appendMessages.append(leaderAppendReqAt(msg.src, retryNext)),
       appendResponses' = appendResponses.slice(1, appendResponses.length()),
       readyCommitted1' = readyCommitted1.concat(committedEntries(log1, lastApplied1, readyCommitIndex1, newCommit)),
@@ -417,6 +462,42 @@ module SingleGroupReplication {
     matchIndex3' = matchIndex3,
     appendMessages' = appendMessages,
     appendResponses' = appendResponses.append(appendResp(2, 1, currentTerm1 - 1, true, log1.length())),
+    readyCommitted1' = readyCommitted1,
+    readyCommitted2' = readyCommitted2,
+    readyCommitted3' = readyCommitted3,
+  }
+
+  action InjectOldTermEntryAppendEntriesResponse = all {
+    role1 == "Leader",
+    currentTerm1 > 1,
+    appendResponses.length() < 4,
+    role1' = role1,
+    role2' = role2,
+    role3' = role3,
+    currentTerm1' = currentTerm1,
+    currentTerm2' = currentTerm2,
+    currentTerm3' = currentTerm3,
+    leaderId1' = leaderId1,
+    leaderId2' = leaderId2,
+    leaderId3' = leaderId3,
+    commitIndex1' = commitIndex1,
+    commitIndex2' = commitIndex2,
+    commitIndex3' = commitIndex3,
+    lastApplied1' = lastApplied1,
+    lastApplied2' = lastApplied2,
+    lastApplied3' = lastApplied3,
+    readyCommitIndex1' = readyCommitIndex1,
+    readyCommitIndex2' = readyCommitIndex2,
+    readyCommitIndex3' = readyCommitIndex3,
+    log1' = log1,
+    log2' = log2,
+    log3' = log3,
+    nextIndex2' = nextIndex2,
+    nextIndex3' = nextIndex3,
+    matchIndex2' = matchIndex2,
+    matchIndex3' = matchIndex3,
+    appendMessages' = appendMessages,
+    appendResponses' = appendResponses.append(appendResp(2, 1, currentTerm1, true, 1)),
     readyCommitted1' = readyCommitted1,
     readyCommitted2' = readyCommitted2,
     readyCommitted3' = readyCommitted3,
@@ -532,9 +613,11 @@ module SingleGroupReplication {
 
   action step = any {
     ClientPropose,
+    TickHeartbeat,
     HandleAppendEntries,
     HandleAppendEntriesResponse,
     InjectStaleAppendEntriesResponse,
+    InjectOldTermEntryAppendEntriesResponse,
     TakeReady,
     AdvanceApplied,
     Noop,
