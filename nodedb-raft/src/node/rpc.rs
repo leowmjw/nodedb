@@ -480,6 +480,115 @@ mod tests {
     }
 
     #[test]
+    fn install_snapshot_rejects_stale_term_without_state_change() {
+        let config = test_config(2, vec![1]);
+        let mut node = RaftNode::new(config, MemStorage::new());
+        node.hard_state.current_term = 3;
+        node.leader_id = 9;
+        node.log.apply_snapshot(4, 2);
+        node.volatile.commit_index = 4;
+        node.volatile.last_applied = 4;
+
+        let req = InstallSnapshotRequest {
+            term: 2,
+            leader_id: 1,
+            last_included_index: 5,
+            last_included_term: 2,
+            offset: 0,
+            data: Vec::new(),
+            done: true,
+            group_id: 1,
+        };
+
+        let resp = node.handle_install_snapshot(&req);
+        assert_eq!(resp.term, 3);
+        assert_eq!(node.current_term(), 3);
+        assert_eq!(node.leader_id(), 9);
+        assert_eq!(node.log_snapshot_index(), 4);
+        assert_eq!(node.log_snapshot_term(), 2);
+        assert_eq!(node.commit_index(), 4);
+        assert_eq!(node.last_applied(), 4);
+    }
+
+    #[test]
+    fn install_snapshot_partial_chunk_updates_term_and_leader_but_does_not_apply() {
+        let config = test_config(2, vec![1]);
+        let mut node = RaftNode::new(config, MemStorage::new());
+        node.hard_state.current_term = 1;
+        node.log
+            .append(LogEntry {
+                term: 1,
+                index: 1,
+                data: b"x".to_vec(),
+            })
+            .unwrap();
+
+        let req = InstallSnapshotRequest {
+            term: 2,
+            leader_id: 1,
+            last_included_index: 5,
+            last_included_term: 2,
+            offset: 0,
+            data: vec![1],
+            done: false,
+            group_id: 1,
+        };
+
+        let resp = node.handle_install_snapshot(&req);
+        assert_eq!(resp.term, 2);
+        assert_eq!(node.current_term(), 2);
+        assert_eq!(node.leader_id(), 1);
+        assert_eq!(node.log_snapshot_index(), 0);
+        assert_eq!(node.commit_index(), 0);
+        assert_eq!(node.last_applied(), 0);
+        assert_eq!(node.log.last_index(), 1);
+    }
+
+    #[test]
+    fn install_snapshot_ignores_older_or_equal_boundary() {
+        let config = test_config(2, vec![1]);
+        let mut node = RaftNode::new(config, MemStorage::new());
+        node.hard_state.current_term = 2;
+        node.log
+            .append(LogEntry {
+                term: 1,
+                index: 1,
+                data: b"x".to_vec(),
+            })
+            .unwrap();
+        node.log
+            .append(LogEntry {
+                term: 2,
+                index: 2,
+                data: b"y".to_vec(),
+            })
+            .unwrap();
+        node.log.apply_snapshot(2, 2);
+        node.volatile.commit_index = 2;
+        node.volatile.last_applied = 2;
+
+        let req = InstallSnapshotRequest {
+            term: 2,
+            leader_id: 1,
+            last_included_index: 2,
+            last_included_term: 2,
+            offset: 0,
+            data: Vec::new(),
+            done: true,
+            group_id: 1,
+        };
+
+        let resp = node.handle_install_snapshot(&req);
+        assert_eq!(resp.term, 2);
+        assert_eq!(node.current_term(), 2);
+        assert_eq!(node.leader_id(), 1);
+        assert_eq!(node.log_snapshot_index(), 2);
+        assert_eq!(node.log_snapshot_term(), 2);
+        assert_eq!(node.commit_index(), 2);
+        assert_eq!(node.last_applied(), 2);
+    }
+
+    #[test]
     fn three_node_election() {
         let config1 = test_config(1, vec![2, 3]);
         let config2 = test_config(2, vec![1, 3]);

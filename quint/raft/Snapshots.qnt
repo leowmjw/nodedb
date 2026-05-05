@@ -151,8 +151,120 @@ module Snapshots {
     snapshotRequests' = snapshotRequests.append(installSnapshotReq(FOLLOWER)),
   }
 
+  action SendPartialInstallSnapshot = all {
+    role1 == "Leader",
+    role1' = role1,
+    role2' = role2,
+    currentTerm1' = currentTerm1,
+    currentTerm2' = currentTerm2,
+    leaderId1' = leaderId1,
+    leaderId2' = leaderId2,
+    commitIndex1' = commitIndex1,
+    commitIndex2' = commitIndex2,
+    lastApplied1' = lastApplied1,
+    lastApplied2' = lastApplied2,
+    snapshotIndex1' = snapshotIndex1,
+    snapshotIndex2' = snapshotIndex2,
+    snapshotTerm1' = snapshotTerm1,
+    snapshotTerm2' = snapshotTerm2,
+    log1' = log1,
+    log2' = log2,
+    nextIndex2' = nextIndex2,
+    matchIndex2' = matchIndex2,
+    snapshotsNeeded' = snapshotsNeeded,
+    snapshotRequests' = snapshotRequests.append({
+      src: LEADER,
+      dst: FOLLOWER,
+      req: {
+        term: currentTerm1,
+        leaderId: LEADER,
+        lastIncludedIndex: snapshotIndex1,
+        lastIncludedTerm: snapshotTerm1,
+        offset: 0,
+        data: 1,
+        done: false,
+        groupId: GROUP_ID,
+      },
+    }),
+  }
+
+  action SendStaleInstallSnapshot = all {
+    currentTerm2 > 0,
+    role1' = role1,
+    role2' = role2,
+    currentTerm1' = currentTerm1,
+    currentTerm2' = currentTerm2,
+    leaderId1' = leaderId1,
+    leaderId2' = leaderId2,
+    commitIndex1' = commitIndex1,
+    commitIndex2' = commitIndex2,
+    lastApplied1' = lastApplied1,
+    lastApplied2' = lastApplied2,
+    snapshotIndex1' = snapshotIndex1,
+    snapshotIndex2' = snapshotIndex2,
+    snapshotTerm1' = snapshotTerm1,
+    snapshotTerm2' = snapshotTerm2,
+    log1' = log1,
+    log2' = log2,
+    nextIndex2' = nextIndex2,
+    matchIndex2' = matchIndex2,
+    snapshotsNeeded' = snapshotsNeeded,
+    snapshotRequests' = snapshotRequests.append({
+      src: LEADER,
+      dst: FOLLOWER,
+      req: {
+        term: currentTerm2 - 1,
+        leaderId: LEADER,
+        lastIncludedIndex: snapshotIndex1,
+        lastIncludedTerm: snapshotTerm1,
+        offset: 0,
+        data: 0,
+        done: true,
+        groupId: GROUP_ID,
+      },
+    }),
+  }
+
+  action SendOlderInstallSnapshot = all {
+    snapshotIndex2 > 0,
+    role1' = role1,
+    role2' = role2,
+    currentTerm1' = currentTerm1,
+    currentTerm2' = currentTerm2,
+    leaderId1' = leaderId1,
+    leaderId2' = leaderId2,
+    commitIndex1' = commitIndex1,
+    commitIndex2' = commitIndex2,
+    lastApplied1' = lastApplied1,
+    lastApplied2' = lastApplied2,
+    snapshotIndex1' = snapshotIndex1,
+    snapshotIndex2' = snapshotIndex2,
+    snapshotTerm1' = snapshotTerm1,
+    snapshotTerm2' = snapshotTerm2,
+    log1' = log1,
+    log2' = log2,
+    nextIndex2' = nextIndex2,
+    matchIndex2' = matchIndex2,
+    snapshotsNeeded' = snapshotsNeeded,
+    snapshotRequests' = snapshotRequests.append({
+      src: LEADER,
+      dst: FOLLOWER,
+      req: {
+        term: currentTerm1,
+        leaderId: LEADER,
+        lastIncludedIndex: snapshotIndex2,
+        lastIncludedTerm: snapshotTerm2,
+        offset: 0,
+        data: 0,
+        done: true,
+        groupId: GROUP_ID,
+      },
+    }),
+  }
+
   action HandleInstallSnapshot = {
     val msg = snapshotRequests[0]
+    val stale = msg.req.term < currentTerm2
     val higherTerm = msg.req.term > currentTerm2
     val apply = msg.req.done and msg.req.lastIncludedIndex > snapshotIndex2
     val newCommit = if (commitIndex2 < msg.req.lastIncludedIndex) msg.req.lastIncludedIndex else commitIndex2
@@ -164,17 +276,17 @@ module Snapshots {
       currentTerm1' = currentTerm1,
       currentTerm2' = if (higherTerm) msg.req.term else currentTerm2,
       leaderId1' = leaderId1,
-      leaderId2' = msg.req.leaderId,
+      leaderId2' = if (stale) leaderId2 else msg.req.leaderId,
       commitIndex1' = commitIndex1,
-      commitIndex2' = if (apply) newCommit else commitIndex2,
+      commitIndex2' = if (stale) commitIndex2 else if (apply) newCommit else commitIndex2,
       lastApplied1' = lastApplied1,
-      lastApplied2' = if (apply) newApplied else lastApplied2,
+      lastApplied2' = if (stale) lastApplied2 else if (apply) newApplied else lastApplied2,
       snapshotIndex1' = snapshotIndex1,
-      snapshotIndex2' = if (apply) msg.req.lastIncludedIndex else snapshotIndex2,
+      snapshotIndex2' = if (stale) snapshotIndex2 else if (apply) msg.req.lastIncludedIndex else snapshotIndex2,
       snapshotTerm1' = snapshotTerm1,
-      snapshotTerm2' = if (apply) msg.req.lastIncludedTerm else snapshotTerm2,
+      snapshotTerm2' = if (stale) snapshotTerm2 else if (apply) msg.req.lastIncludedTerm else snapshotTerm2,
       log1' = log1,
-      log2' = if (apply and log2.length() > 0 and msg.req.lastIncludedIndex < lastIndex(snapshotIndex2, log2)) {
+      log2' = if (stale) log2 else if (apply and log2.length() > 0 and msg.req.lastIncludedIndex < lastIndex(snapshotIndex2, log2)) {
         entriesFrom(log2, msg.req.lastIncludedIndex + 1)
       } else if (apply) {
         List()
@@ -224,6 +336,9 @@ module Snapshots {
   action step = any {
     RequestSnapshotNeeded,
     SendInstallSnapshot,
+    SendPartialInstallSnapshot,
+    SendStaleInstallSnapshot,
+    SendOlderInstallSnapshot,
     HandleInstallSnapshot,
     Noop,
   }

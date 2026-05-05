@@ -271,6 +271,38 @@ mod tests {
     }
 
     #[test]
+    fn add_peer_on_leader_changes_quorum_and_tracking() {
+        let mut node = RaftNode::new(cfg(1, vec![]), MemStorage::new());
+        force_leader(&mut node);
+        assert_eq!(node.role(), NodeRole::Leader);
+        assert_eq!(node.config.cluster_size(), 1);
+        assert_eq!(node.config.quorum(), 1);
+
+        node.add_peer(3);
+
+        assert_eq!(node.voters(), &[3]);
+        assert_eq!(node.config.cluster_size(), 2);
+        assert_eq!(node.config.quorum(), 2);
+        assert_eq!(node.match_index_for(3), Some(0));
+    }
+
+    #[test]
+    fn remove_peer_on_leader_drops_tracking_and_quorum() {
+        let mut node = RaftNode::new(cfg(1, vec![]), MemStorage::new());
+        force_leader(&mut node);
+        node.add_peer(3);
+        assert_eq!(node.config.cluster_size(), 2);
+        assert_eq!(node.match_index_for(3), Some(0));
+
+        node.remove_peer(3);
+
+        assert!(node.voters().is_empty());
+        assert_eq!(node.config.cluster_size(), 1);
+        assert_eq!(node.config.quorum(), 1);
+        assert_eq!(node.match_index_for(3), Some(0));
+    }
+
+    #[test]
     fn promote_self_flips_role() {
         let mut c = cfg(2, vec![1]);
         c.starts_as_learner = true;

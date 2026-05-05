@@ -80,6 +80,7 @@ struct ModelState {
     match_index3: i64,
     learner3: bool,
     voter3: bool,
+    promoted3: bool,
     starts_as_learner3: bool,
     learner_vote_granted: bool,
     append_messages: Vec<ModelAppendEnvelope>,
@@ -92,6 +93,7 @@ struct LearnerDriver {
     append_messages: Vec<ModelAppendEnvelope>,
     append_responses: Vec<ModelAppendResponseEnvelope>,
     learner_vote_granted: bool,
+    promoted3: bool,
 }
 
 impl Driver for LearnerDriver {
@@ -101,6 +103,9 @@ impl Driver for LearnerDriver {
         switch!(step {
             init => self.init()?,
             AddLearner => self.add_learner()?,
+            AddVoter => self.add_voter()?,
+            RemoveLearner => self.remove_learner()?,
+            RemoveVoter => self.remove_voter()?,
             ClientPropose => self.client_propose()?,
             TickHeartbeat => self.tick_heartbeat()?,
             HandleAppendEntries => self.handle_append_entries()?,
@@ -142,6 +147,7 @@ impl State<LearnerDriver> for ModelState {
             match_index3: match_index(n1, 3) as i64,
             learner3: n1.learners().contains(&3),
             voter3: n1.voters().contains(&3),
+            promoted3: driver.promoted3,
             starts_as_learner3: n3.config.starts_as_learner,
             learner_vote_granted: driver.learner_vote_granted,
             append_messages: driver.append_messages.clone(),
@@ -156,6 +162,7 @@ impl LearnerDriver {
         self.append_messages.clear();
         self.append_responses.clear();
         self.learner_vote_granted = false;
+        self.promoted3 = false;
 
         for node_id in [1, 2, 3] {
             let mut node = RaftNode::new(config(node_id), MemStorage::new());
@@ -198,6 +205,25 @@ impl LearnerDriver {
 
     fn add_learner(&mut self) -> Result {
         self.node_mut(1)?.add_learner(3);
+        self.promoted3 = false;
+        Ok(())
+    }
+
+    fn add_voter(&mut self) -> Result {
+        self.node_mut(1)?.add_peer(3);
+        self.promoted3 = false;
+        Ok(())
+    }
+
+    fn remove_learner(&mut self) -> Result {
+        self.node_mut(1)?.remove_learner(3);
+        self.promoted3 = false;
+        Ok(())
+    }
+
+    fn remove_voter(&mut self) -> Result {
+        self.node_mut(1)?.remove_peer(3);
+        self.promoted3 = false;
         Ok(())
     }
 
@@ -259,7 +285,7 @@ impl LearnerDriver {
     }
 
     fn promote_learner(&mut self) -> Result {
-        self.node_mut(1)?.promote_learner(3);
+        self.promoted3 = self.node_mut(1)?.promote_learner(3);
         Ok(())
     }
 

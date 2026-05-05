@@ -78,6 +78,9 @@ impl Driver for SnapshotDriver {
             init => self.init()?,
             RequestSnapshotNeeded => self.request_snapshot_needed()?,
             SendInstallSnapshot => self.send_install_snapshot()?,
+            SendPartialInstallSnapshot => self.send_partial_install_snapshot()?,
+            SendStaleInstallSnapshot => self.send_stale_install_snapshot()?,
+            SendOlderInstallSnapshot => self.send_older_install_snapshot()?,
             HandleInstallSnapshot => self.handle_install_snapshot()?,
             Noop => (),
         })
@@ -197,6 +200,75 @@ impl SnapshotDriver {
                 },
             });
         }
+        Ok(())
+    }
+
+    fn send_partial_install_snapshot(&mut self) -> Result {
+        let (term, last_included_index, last_included_term, group_id) = {
+            let leader = self.node(1)?;
+            (
+                leader.hard_state.current_term,
+                leader.log.snapshot_index(),
+                leader.log.snapshot_term(),
+                leader.group_id(),
+            )
+        };
+        self.snapshot_requests.push(ModelInstallSnapshotEnvelope {
+            src: 1,
+            dst: 2,
+            req: ModelInstallSnapshot {
+                term: term as i64,
+                leader_id: 1,
+                last_included_index: last_included_index as i64,
+                last_included_term: last_included_term as i64,
+                offset: 0,
+                data: 1,
+                done: false,
+                group_id: group_id as i64,
+            },
+        });
+        Ok(())
+    }
+
+    fn send_stale_install_snapshot(&mut self) -> Result {
+        let follower_term = self.node(2)?.hard_state.current_term;
+        let group_id = self.node(1)?.group_id();
+        let last_included_index = self.node(1)?.log.snapshot_index();
+        let last_included_term = self.node(1)?.log.snapshot_term();
+        self.snapshot_requests.push(ModelInstallSnapshotEnvelope {
+            src: 1,
+            dst: 2,
+            req: ModelInstallSnapshot {
+                term: follower_term.saturating_sub(1) as i64,
+                leader_id: 1,
+                last_included_index: last_included_index as i64,
+                last_included_term: last_included_term as i64,
+                offset: 0,
+                data: 0,
+                done: true,
+                group_id: group_id as i64,
+            },
+        });
+        Ok(())
+    }
+
+    fn send_older_install_snapshot(&mut self) -> Result {
+        let follower = self.node(2)?;
+        let group_id = self.node(1)?.group_id();
+        self.snapshot_requests.push(ModelInstallSnapshotEnvelope {
+            src: 1,
+            dst: 2,
+            req: ModelInstallSnapshot {
+                term: self.node(1)?.hard_state.current_term as i64,
+                leader_id: 1,
+                last_included_index: follower.log.snapshot_index() as i64,
+                last_included_term: follower.log.snapshot_term() as i64,
+                offset: 0,
+                data: 0,
+                done: true,
+                group_id: group_id as i64,
+            },
+        });
         Ok(())
     }
 

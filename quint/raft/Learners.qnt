@@ -46,6 +46,7 @@ module Learners {
   var matchIndex3: int
   var learner3: bool
   var voter3: bool
+  var promoted3: bool
   var startsAsLearner3: bool
   var learnerVoteGranted: bool
   var appendMessages: List[AppendEnvelope]
@@ -186,6 +187,7 @@ module Learners {
     matchIndex3' = 0,
     learner3' = false,
     voter3' = false,
+    promoted3' = false,
     startsAsLearner3' = true,
     learnerVoteGranted' = false,
     appendMessages' = List(),
@@ -217,6 +219,101 @@ module Learners {
     matchIndex3' = 0,
     learner3' = true,
     voter3' = voter3,
+    promoted3' = false,
+    startsAsLearner3' = startsAsLearner3,
+    learnerVoteGranted' = learnerVoteGranted,
+    appendMessages' = appendMessages,
+    appendResponses' = appendResponses,
+  }
+
+  action AddVoter = all {
+    role1 == "Leader",
+    not(learner3),
+    not(voter3),
+    role1' = role1,
+    role2' = role2,
+    role3' = role3,
+    currentTerm1' = currentTerm1,
+    currentTerm2' = currentTerm2,
+    currentTerm3' = currentTerm3,
+    leaderId1' = leaderId1,
+    leaderId2' = leaderId2,
+    leaderId3' = leaderId3,
+    commitIndex1' = commitIndex1,
+    commitIndex2' = commitIndex2,
+    commitIndex3' = commitIndex3,
+    log1' = log1,
+    log2' = log2,
+    log3' = log3,
+    nextIndex2' = nextIndex2,
+    nextIndex3' = log1.length() + 1,
+    matchIndex2' = matchIndex2,
+    matchIndex3' = 0,
+    learner3' = false,
+    voter3' = true,
+    promoted3' = false,
+    startsAsLearner3' = startsAsLearner3,
+    learnerVoteGranted' = learnerVoteGranted,
+    appendMessages' = appendMessages,
+    appendResponses' = appendResponses,
+  }
+
+  action RemoveLearner = all {
+    learner3,
+    not(voter3),
+    role1' = role1,
+    role2' = role2,
+    role3' = role3,
+    currentTerm1' = currentTerm1,
+    currentTerm2' = currentTerm2,
+    currentTerm3' = currentTerm3,
+    leaderId1' = leaderId1,
+    leaderId2' = leaderId2,
+    leaderId3' = leaderId3,
+    commitIndex1' = commitIndex1,
+    commitIndex2' = commitIndex2,
+    commitIndex3' = commitIndex3,
+    log1' = log1,
+    log2' = log2,
+    log3' = log3,
+    nextIndex2' = nextIndex2,
+    nextIndex3' = 1,
+    matchIndex2' = matchIndex2,
+    matchIndex3' = 0,
+    learner3' = false,
+    voter3' = false,
+    promoted3' = false,
+    startsAsLearner3' = startsAsLearner3,
+    learnerVoteGranted' = learnerVoteGranted,
+    appendMessages' = appendMessages,
+    appendResponses' = appendResponses,
+  }
+
+  action RemoveVoter = all {
+    voter3,
+    role1 == "Leader",
+    role1' = role1,
+    role2' = role2,
+    role3' = role3,
+    currentTerm1' = currentTerm1,
+    currentTerm2' = currentTerm2,
+    currentTerm3' = currentTerm3,
+    leaderId1' = leaderId1,
+    leaderId2' = leaderId2,
+    leaderId3' = leaderId3,
+    commitIndex1' = commitIndex1,
+    commitIndex2' = commitIndex2,
+    commitIndex3' = commitIndex3,
+    log1' = log1,
+    log2' = log2,
+    log3' = log3,
+    nextIndex2' = nextIndex2,
+    nextIndex3' = 1,
+    matchIndex2' = matchIndex2,
+    matchIndex3' = 0,
+    learner3' = false,
+    voter3' = false,
+    promoted3' = false,
     startsAsLearner3' = startsAsLearner3,
     learnerVoteGranted' = learnerVoteGranted,
     appendMessages' = appendMessages,
@@ -267,6 +364,7 @@ module Learners {
       matchIndex3' = matchIndex3,
       learner3' = learner3,
       voter3' = voter3,
+      promoted3' = promoted3,
       startsAsLearner3' = startsAsLearner3,
       learnerVoteGranted' = learnerVoteGranted,
       appendMessages' = appendMessages.concat(tracked),
@@ -297,6 +395,7 @@ module Learners {
     matchIndex3' = matchIndex3,
     learner3' = learner3,
     voter3' = voter3,
+    promoted3' = promoted3,
     startsAsLearner3' = startsAsLearner3,
     learnerVoteGranted' = learnerVoteGranted,
     appendMessages' = if (learner3 or voter3) {
@@ -341,6 +440,7 @@ module Learners {
       matchIndex3' = matchIndex3,
       learner3' = learner3,
       voter3' = voter3,
+      promoted3' = promoted3,
       startsAsLearner3' = startsAsLearner3,
       learnerVoteGranted' = learnerVoteGranted,
       appendMessages' = appendMessages.slice(1, appendMessages.length()),
@@ -350,7 +450,8 @@ module Learners {
 
   action HandleAppendEntriesResponse = {
     val msg = appendResponses[0]
-    val advancesMatch = msg.resp.success and msg.resp.lastLogIndex > matchIndexOf(msg.src)
+    val peerTracked = msg.src == 2 or learner3 or voter3
+    val advancesMatch = msg.resp.success and peerTracked and msg.resp.lastLogIndex > matchIndexOf(msg.src)
     val newMatch = if (advancesMatch) msg.resp.lastLogIndex else matchIndexOf(msg.src)
     val newCommit = if (msg.resp.success) commitWithAck(msg.src, newMatch, commitIndex1) else commitIndex1
     val retryNext = retryNextIndex(msg.resp.lastLogIndex, nextIndexOf(msg.src))
@@ -372,11 +473,12 @@ module Learners {
       log2' = log2,
       log3' = log3,
       nextIndex2' = if (msg.src == 2 and advancesMatch) newMatch + 1 else if (msg.src == 2 and not(msg.resp.success)) retryNext else nextIndex2,
-      nextIndex3' = if (msg.src == 3 and advancesMatch) newMatch + 1 else if (msg.src == 3 and not(msg.resp.success)) retryNext else nextIndex3,
+      nextIndex3' = if (msg.src == 3 and advancesMatch) newMatch + 1 else if (msg.src == 3 and not(msg.resp.success) and peerTracked) retryNext else nextIndex3,
       matchIndex2' = if (msg.src == 2 and advancesMatch) newMatch else matchIndex2,
       matchIndex3' = if (msg.src == 3 and advancesMatch) newMatch else matchIndex3,
       learner3' = learner3,
       voter3' = voter3,
+      promoted3' = promoted3,
       startsAsLearner3' = startsAsLearner3,
       learnerVoteGranted' = learnerVoteGranted,
       appendMessages' = if (msg.resp.success) appendMessages else appendMessages.append(leaderAppendReqAt(msg.src, retryNext)),
@@ -386,6 +488,7 @@ module Learners {
 
   action RequestVoteAtLearner = all {
     role3 == "Learner",
+    not(voter3),
     role1' = role1,
     role2' = role2,
     role3' = role3,
@@ -407,6 +510,7 @@ module Learners {
     matchIndex3' = matchIndex3,
     learner3' = learner3,
     voter3' = voter3,
+    promoted3' = promoted3,
     startsAsLearner3' = startsAsLearner3,
     learnerVoteGranted' = false,
     appendMessages' = appendMessages,
@@ -415,6 +519,7 @@ module Learners {
 
   action TickLearnerElectionTimeout = all {
     role3 == "Learner",
+    not(voter3),
     role1' = role1,
     role2' = role2,
     role3' = role3,
@@ -436,6 +541,7 @@ module Learners {
     matchIndex3' = matchIndex3,
     learner3' = learner3,
     voter3' = voter3,
+    promoted3' = promoted3,
     startsAsLearner3' = startsAsLearner3,
     learnerVoteGranted' = learnerVoteGranted,
     appendMessages' = appendMessages,
@@ -467,6 +573,7 @@ module Learners {
     matchIndex3' = matchIndex3,
     learner3' = false,
     voter3' = true,
+    promoted3' = true,
     startsAsLearner3' = startsAsLearner3,
     learnerVoteGranted' = learnerVoteGranted,
     appendMessages' = appendMessages,
@@ -496,6 +603,7 @@ module Learners {
     matchIndex3' = matchIndex3,
     learner3' = learner3,
     voter3' = voter3,
+    promoted3' = promoted3,
     startsAsLearner3' = false,
     learnerVoteGranted' = learnerVoteGranted,
     appendMessages' = appendMessages,
@@ -524,6 +632,7 @@ module Learners {
     matchIndex3' = matchIndex3,
     learner3' = learner3,
     voter3' = voter3,
+    promoted3' = promoted3,
     startsAsLearner3' = startsAsLearner3,
     learnerVoteGranted' = learnerVoteGranted,
     appendMessages' = appendMessages,
@@ -541,7 +650,19 @@ module Learners {
 
   val learnerAckDoesNotCommit = voter3 or commitIndex1 <= 1 or matchIndex2 >= commitIndex1
 
-  val promotionOnlyAfterCatchUp = not(voter3) or matchIndex3 >= 1
+  val promotionOnlyAfterCatchUp = not(promoted3) or matchIndex3 >= 1
+
+  val membershipTrackingMatchesConfig =
+    if (learner3 or voter3)
+      nextIndex3 >= 1
+    else
+      nextIndex3 == 1 and matchIndex3 == 0
+
+  val directVoterChangesClusterSize =
+    if (voter3)
+      clusterSize1 == 3 and quorum1 == 2
+    else
+      clusterSize1 == 2 and quorum1 == 2
 
   val logMatching = all {
     log1.indices().forall(i => i >= log2.length() or log1[i].index != log2[i].index or log1[i].term != log2[i].term or log1.slice(0, i + 1) == log2.slice(0, i + 1)),
@@ -550,6 +671,9 @@ module Learners {
 
   action step = any {
     AddLearner,
+    AddVoter,
+    RemoveLearner,
+    RemoveVoter,
     ClientPropose,
     TickHeartbeat,
     HandleAppendEntries,
