@@ -132,8 +132,11 @@ async fn lease_renews_before_expiry() {
     // Wait long enough for the renewal loop to wake AT LEAST once
     // (1s tick) AND for the 80% threshold to trigger (after 0.6s
     // elapsed the remaining time is below 80% of 3s = 2.4s).
-    // 1.5 seconds is comfortably past both.
+    // Use 2s on non-Linux to absorb tokio scheduler jitter on macOS.
+    #[cfg(target_os = "linux")]
     tokio::time::sleep(Duration::from_millis(1500)).await;
+    #[cfg(not(target_os = "linux"))]
+    tokio::time::sleep(Duration::from_millis(2000)).await;
 
     // Read the lease back. The renewal loop should have re-acquired
     // it, producing a strictly greater `expires_at`.

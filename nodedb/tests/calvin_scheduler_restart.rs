@@ -98,7 +98,7 @@ fn scheduler_restart_greenfield_returns_sentinel() {
     let last_epoch = read_last_applied_epoch(&wal, 1).unwrap();
     assert_eq!(
         last_epoch, NOT_YET_APPLIED_EPOCH,
-        "greenfield WAL should return the not-yet-applied sentinel"
+        "greenfield WAL should return the not-yet-applied sentinel ({NOT_YET_APPLIED_EPOCH})"
     );
 }
 

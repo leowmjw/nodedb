@@ -120,9 +120,15 @@ async fn scheduler_catchup_via_raft_log_replay() {
         .await
         .expect("spawn_with_sequencer");
 
-    // Wait for sequencer leader election.
+    // Wait for sequencer leader election. macOS needs extra headroom due to
+    // slower Raft heartbeat scheduling under debug builds.
+    #[cfg(target_os = "linux")]
+    let raft_timeout = Duration::from_secs(10);
+    #[cfg(not(target_os = "linux"))]
+    let raft_timeout = Duration::from_secs(20);
+
     let leader_idx =
-        wait_for_sequencer_leader(&nodes, Duration::from_secs(10), Duration::from_millis(50)).await;
+        wait_for_sequencer_leader(&nodes, raft_timeout, Duration::from_millis(50)).await;
 
     let config = SequencerConfig {
         epoch_duration: Duration::from_millis(10),
@@ -162,7 +168,7 @@ async fn scheduler_catchup_via_raft_log_replay() {
     // All 3 nodes must converge on at least one applied epoch.
     common::wait_for(
         "all 3 nodes apply pre-batch epochs",
-        Duration::from_secs(10),
+        raft_timeout,
         Duration::from_millis(20),
         || nodes.iter().all(|n| n.last_applied_epoch().is_some()),
     )
@@ -211,7 +217,7 @@ async fn scheduler_catchup_via_raft_log_replay() {
     let expected_min_epoch = pre_epoch_leader + 1;
     common::wait_for(
         "all 3 nodes apply post-batch epochs",
-        Duration::from_secs(10),
+        raft_timeout,
         Duration::from_millis(20),
         || {
             nodes.iter().all(|n| {

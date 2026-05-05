@@ -228,22 +228,19 @@ mod tests {
         })
     }
 
-    async fn make_provider_with_endpoint(
-        port: u16,
-        ciphertext_blob_path: PathBuf,
-    ) -> AwsKmsProvider {
-        // Override the KMS endpoint to point at the mock.
+    fn make_provider_with_endpoint(port: u16, ciphertext_blob_path: PathBuf) -> AwsKmsProvider {
+        // Build the KMS config directly so the SDK never probes IMDS or the
+        // credential chain — both time out on non-EC2 hosts (e.g. macOS CI).
         let endpoint = format!("http://127.0.0.1:{port}");
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        let config = aws_sdk_kms::Config::builder()
+            .behavior_version(aws_sdk_kms::config::BehaviorVersion::latest())
             .region(aws_sdk_kms::config::Region::new("us-east-1"))
             .endpoint_url(&endpoint)
-            // Provide dummy credentials so the SDK doesn't fail credential resolution.
             .credentials_provider(aws_sdk_kms::config::Credentials::new(
                 "AKID", "SECRET", None, None, "test",
             ))
-            .load()
-            .await;
-        let client = KmsClient::new(&config);
+            .build();
+        let client = KmsClient::from_conf(config);
         AwsKmsProvider {
             key_id: "arn:aws:kms:us-east-1:123:key/fake".into(),
             ciphertext_blob_path,
@@ -272,7 +269,7 @@ mod tests {
         let blob_path = dir.path().join("ct.bin");
         write_secure(&blob_path, &[0xFFu8; 64]);
 
-        let provider = make_provider_with_endpoint(port, blob_path).await;
+        let provider = make_provider_with_endpoint(port, blob_path);
         let key = provider.unwrap_key().await.unwrap();
         assert_eq!(*key, [0x42u8; 32]);
     }
@@ -288,7 +285,7 @@ mod tests {
         let blob_path = dir.path().join("ct.bin");
         write_secure(&blob_path, &[0xFFu8; 64]);
 
-        let provider = make_provider_with_endpoint(port, blob_path).await;
+        let provider = make_provider_with_endpoint(port, blob_path);
         let err = provider.unwrap_key().await.unwrap_err();
         let detail = format!("{err:?}");
         assert!(
@@ -311,7 +308,7 @@ mod tests {
         std::fs::set_permissions(&blob_path, std::fs::Permissions::from_mode(0o644)).unwrap();
 
         // Use a dummy port — the check fires before any network call.
-        let provider = make_provider_with_endpoint(19999, blob_path).await;
+        let provider = make_provider_with_endpoint(19999, blob_path);
         let err = provider.unwrap_key().await.unwrap_err();
         let detail = format!("{err:?}");
         assert!(

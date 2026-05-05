@@ -4,6 +4,14 @@
 
 use std::time::Duration;
 
+// macOS debug builds run Raft under heavier CPU contention (hundreds of
+// parallel unit tests) and have slower fsync. Give cluster startup and
+// leader-election waits twice as much headroom on non-Linux hosts.
+#[cfg(target_os = "linux")]
+const CLUSTER_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(not(target_os = "linux"))]
+const CLUSTER_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
+
 use nodedb_types::config::tuning::ClusterTransportTuning;
 
 use super::node::TestClusterNode;
@@ -52,10 +60,10 @@ impl TestCluster {
         // short under heavy host load (e.g. 500+ parallel unit tests
         // sharing the same CPU pool), causing peers to dial before
         // node 1's transport was ready — failing topology convergence.
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let deadline = std::time::Instant::now() + CLUSTER_STARTUP_TIMEOUT;
         while node1.topology_size() < 1 {
             if std::time::Instant::now() >= deadline {
-                return Err("node 1 failed to bootstrap within 30s".into());
+                return Err("node 1 failed to bootstrap within deadline".into());
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -67,10 +75,10 @@ impl TestCluster {
         // Under load, spawning both peers simultaneously can overwhelm the
         // bootstrap leader's join handler, causing neither join to complete
         // within the topology convergence deadline.
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let deadline = std::time::Instant::now() + CLUSTER_STARTUP_TIMEOUT;
         while node1.topology_size() < 2 {
             if std::time::Instant::now() >= deadline {
-                return Err("node 2 failed to join within 30s".into());
+                return Err("node 2 failed to join within deadline".into());
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -83,7 +91,7 @@ impl TestCluster {
 
         wait_for(
             "all 3 nodes report topology_size == 3",
-            Duration::from_secs(30),
+            CLUSTER_STARTUP_TIMEOUT,
             Duration::from_millis(50),
             || cluster.nodes.iter().all(|n| n.topology_size() == 3),
         )
@@ -114,7 +122,7 @@ impl TestCluster {
         // replication.
         wait_for(
             "all 3 nodes exit rolling-upgrade compat mode",
-            Duration::from_secs(30),
+            CLUSTER_STARTUP_TIMEOUT,
             Duration::from_millis(20),
             || {
                 cluster.nodes.iter().all(|n| {
@@ -145,7 +153,7 @@ impl TestCluster {
         // wasted CI minutes on cleanup of a doomed cluster bringup.
         wait_for(
             "metadata group has stable leader visible on every node",
-            Duration::from_secs(30),
+            CLUSTER_STARTUP_TIMEOUT,
             Duration::from_millis(20),
             || {
                 let leaders: Vec<u64> = cluster
@@ -182,7 +190,7 @@ impl TestCluster {
         // window deterministically.
         wait_for(
             "every Raft group has a stable leader visible on every node",
-            Duration::from_secs(30),
+            CLUSTER_STARTUP_TIMEOUT,
             Duration::from_millis(20),
             || {
                 // Snapshot every node's per-group leader view. A group
@@ -239,7 +247,7 @@ impl TestCluster {
     /// queues, so it's both strictly more correct and strictly
     /// faster than waiting on the visibility check itself.
     pub async fn exec_ddl_on_any_leader(&self, sql: &str) -> Result<usize, String> {
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let deadline = std::time::Instant::now() + CLUSTER_STARTUP_TIMEOUT;
         let mut last_err = String::new();
         while std::time::Instant::now() < deadline {
             for (idx, node) in self.nodes.iter().enumerate() {
@@ -254,7 +262,7 @@ impl TestCluster {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         Err(format!(
-            "no node accepted DDL within 10s; last error: {last_err}"
+            "no node accepted DDL within deadline; last error: {last_err}"
         ))
     }
 
@@ -270,7 +278,7 @@ impl TestCluster {
         if target == 0 {
             return;
         }
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let deadline = std::time::Instant::now() + CLUSTER_STARTUP_TIMEOUT;
         loop {
             let all_caught_up = self
                 .nodes
