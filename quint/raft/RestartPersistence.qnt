@@ -188,8 +188,8 @@ module RestartPersistence {
     role' = "Follower",
     currentTerm' = storedCurrentTerm,
     votedFor' = storedVotedFor,
-    commitIndex' = 0,
-    lastApplied' = 0,
+    commitIndex' = storedSnapshotIndex,
+    lastApplied' = storedSnapshotIndex,
     leaderId' = 0,
     snapshotIndex' = storedSnapshotIndex,
     snapshotTerm' = storedSnapshotTerm,
@@ -262,8 +262,10 @@ module RestartPersistence {
   val snapshotAndLogPersisted =
     snapshotIndex == storedSnapshotIndex and snapshotTerm == storedSnapshotTerm and log == storedLog
 
-  val restartedVolatileReset =
-    if (phase >= 7) commitIndex == 0 and lastApplied == 0 and leaderId == 0 and role == "Follower" else true
+  val restartedVolatileRestored =
+    if (phase >= 7)
+      commitIndex == snapshotIndex and lastApplied == snapshotIndex and leaderId == 0 and role == "Follower"
+    else true
 
   val secondCandidateNotGranted = voteGrantedTo3 == false
 }

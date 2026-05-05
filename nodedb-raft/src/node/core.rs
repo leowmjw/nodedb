@@ -104,6 +104,10 @@ impl<S: LogStorage> RaftNode<S> {
     pub fn restore(&mut self) -> Result<()> {
         self.hard_state = self.log.storage().load_hard_state()?;
         self.log.restore()?;
+        let restored_applied = self.log.snapshot_index();
+        self.volatile.commit_index = restored_applied;
+        self.volatile.last_applied = restored_applied;
+        self.ready_commit_index = restored_applied;
         self.reset_election_timeout();
         Ok(())
     }
@@ -437,6 +441,9 @@ mod tests {
         assert_eq!(restored.voted_for(), 2);
         assert_eq!(restored.log_snapshot_index(), 2);
         assert_eq!(restored.log_snapshot_term(), 4);
+        assert_eq!(restored.commit_index(), 2);
+        assert_eq!(restored.last_applied(), 2);
+        assert_eq!(restored.ready_commit_index, 2);
         assert_eq!(restored.log.last_index(), 3);
         assert_eq!(restored.log.last_term(), 4);
         let entries = restored.log.entries_range(3, 3).unwrap();

@@ -38,7 +38,13 @@ impl<A: CommitApplier, P: PlanExecutor> RaftLoop<A, P> {
         // Phase 1: tick under lock, extract Ready.
         let ready = {
             let mut mr = self.multi_raft.lock().unwrap_or_else(|p| p.into_inner());
-            mr.tick()
+            match mr.tick() {
+                Ok(ready) => ready,
+                Err(e) => {
+                    warn!(error = %e, "raft tick aborted after hard-state persistence failure");
+                    return;
+                }
+            }
         };
 
         // Phase 2+3: dispatch messages first (even if ready looks "empty"

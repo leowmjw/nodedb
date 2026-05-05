@@ -7,7 +7,7 @@ use std::time::Duration;
 use tracing::info;
 
 use nodedb_raft::node::RaftConfig;
-use nodedb_raft::{RaftNode, Ready};
+use nodedb_raft::{LogStorage, RaftNode, Ready};
 
 use crate::error::{ClusterError, Result};
 use crate::raft_storage::RedbLogStorage;
@@ -161,21 +161,17 @@ impl MultiRaft {
     }
 
     /// Tick all Raft groups. Returns aggregated ready output.
-    pub fn tick(&mut self) -> MultiRaftReady {
+    pub fn tick(&mut self) -> Result<MultiRaftReady> {
         let mut ready = MultiRaftReady::default();
 
         for (&group_id, node) in &mut self.groups {
-            node.tick();
-            if let Err(e) = node.persist_ready_hard_state() {
-                tracing::warn!(group_id, error = %e, "failed to persist raft hard state");
-            }
-            let r = node.take_ready();
+            let r = tick_group(node)?;
             if !r.is_empty() {
                 ready.groups.push((group_id, r));
             }
         }
 
-        ready
+        Ok(ready)
     }
 
     pub fn routing(&self) -> &RoutingTable {
@@ -262,10 +258,71 @@ impl MultiRaft {
     }
 }
 
+fn tick_group<S: LogStorage>(node: &mut RaftNode<S>) -> nodedb_raft::Result<Ready> {
+    node.tick();
+    node.persist_ready_hard_state()?;
+    Ok(node.take_ready())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
+    use nodedb_raft::state::HardState;
+    use nodedb_raft::storage::MemStorage;
+    use std::time::{Duration, Instant};
+
+    #[derive(Clone, Default)]
+    struct FailHardStateStorage {
+        inner: MemStorage,
+    }
+
+    impl LogStorage for FailHardStateStorage {
+        fn append(&mut self, entries: &[nodedb_raft::LogEntry]) -> nodedb_raft::Result<()> {
+            self.inner.append(entries)
+        }
+
+        fn truncate(&mut self, index: u64) -> nodedb_raft::Result<()> {
+            self.inner.truncate(index)
+        }
+
+        fn load_entries_after(
+            &self,
+            snapshot_index: u64,
+        ) -> nodedb_raft::Result<Vec<nodedb_raft::LogEntry>> {
+            self.inner.load_entries_after(snapshot_index)
+        }
+
+        fn compact(&mut self, index: u64, term: u64) -> nodedb_raft::Result<()> {
+            self.inner.compact(index, term)
+        }
+
+        fn snapshot_metadata(&self) -> (u64, u64) {
+            self.inner.snapshot_metadata()
+        }
+
+        fn save_hard_state(&mut self, _state: &HardState) -> nodedb_raft::Result<()> {
+            Err(nodedb_raft::RaftError::Storage {
+                detail: "injected hard-state persistence failure".into(),
+            })
+        }
+
+        fn load_hard_state(&self) -> nodedb_raft::Result<HardState> {
+            self.inner.load_hard_state()
+        }
+    }
+
+    fn test_config(node_id: u64, peers: Vec<u64>) -> RaftConfig {
+        RaftConfig {
+            node_id,
+            group_id: 1,
+            peers,
+            learners: vec![],
+            starts_as_learner: false,
+            election_timeout_min: Duration::from_millis(150),
+            election_timeout_max: Duration::from_millis(300),
+            heartbeat_interval: Duration::from_millis(50),
+        }
+    }
 
     #[test]
     fn single_node_multi_raft() {
@@ -284,7 +341,7 @@ mod tests {
             node.election_deadline_override(Instant::now() - Duration::from_millis(1));
         }
 
-        let ready = mr.tick();
+        let ready = mr.tick().unwrap();
         assert_eq!(ready.groups.len(), 5);
     }
 
@@ -300,8 +357,8 @@ mod tests {
         for node in mr.groups.values_mut() {
             node.election_deadline_override(Instant::now() - Duration::from_millis(1));
         }
-        mr.tick();
-        for (gid, ready) in mr.tick().groups {
+        mr.tick().unwrap();
+        for (gid, ready) in mr.tick().unwrap().groups {
             if let Some(last) = ready.committed_entries.last() {
                 mr.advance_applied(gid, last.index).unwrap();
             }
@@ -342,12 +399,65 @@ mod tests {
             .get_mut(&0)
             .unwrap()
             .election_deadline_override(Instant::now() - Duration::from_millis(1));
-        let _ = mr.tick();
+        let _ = mr.tick().unwrap();
         drop(mr);
 
         let mut reopened = MultiRaft::new(1, rt, dir.path().to_path_buf());
         reopened.add_group(0, vec![]).unwrap();
         let node = reopened.groups.get(&0).unwrap();
+        assert_eq!(node.current_term(), 1);
+        assert_eq!(node.voted_for(), 1);
+    }
+
+    #[test]
+    fn reopened_group_restores_snapshot_applied_watermark() {
+        let dir = tempfile::tempdir().unwrap();
+        let rt = RoutingTable::uniform(1, &[1], 1);
+        let storage_path = dir.path().join("raft/group-0.redb");
+
+        let mut storage = RedbLogStorage::open(&storage_path).unwrap();
+        storage
+            .append(&[nodedb_raft::LogEntry {
+                term: 4,
+                index: 1,
+                data: b"a".to_vec(),
+            }])
+            .unwrap();
+        storage
+            .append(&[nodedb_raft::LogEntry {
+                term: 4,
+                index: 2,
+                data: b"b".to_vec(),
+            }])
+            .unwrap();
+        storage
+            .append(&[nodedb_raft::LogEntry {
+                term: 4,
+                index: 3,
+                data: b"c".to_vec(),
+            }])
+            .unwrap();
+        storage.compact(2, 4).unwrap();
+        drop(storage);
+
+        let mut reopened = MultiRaft::new(1, rt, dir.path().to_path_buf());
+        reopened.add_group(0, vec![]).unwrap();
+        let node = reopened.groups.get(&0).unwrap();
+        assert_eq!(node.log_snapshot_index(), 2);
+        assert_eq!(node.commit_index(), 2);
+        assert_eq!(node.last_applied(), 2);
+    }
+
+    #[test]
+    fn tick_group_blocks_ready_when_hard_state_persist_fails() {
+        let mut node = RaftNode::new(test_config(1, vec![2, 3]), FailHardStateStorage::default());
+        node.restore().unwrap();
+        node.election_deadline_override(Instant::now() - Duration::from_millis(1));
+        let err = tick_group(&mut node).unwrap_err();
+        assert!(matches!(err, nodedb_raft::RaftError::Storage { .. }));
+        let ready = node.take_ready();
+        assert!(ready.hard_state.is_some());
+        assert_eq!(ready.vote_requests.len(), 2);
         assert_eq!(node.current_term(), 1);
         assert_eq!(node.voted_for(), 1);
     }
