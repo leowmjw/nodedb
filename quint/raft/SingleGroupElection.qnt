@@ -295,4 +295,14 @@ module SingleGroupElection {
     (votedFor1 == NO_VOTE or NODES.contains(votedFor1)) and
       (votedFor2 == NO_VOTE or NODES.contains(votedFor2)) and
       (votedFor3 == NO_VOTE or NODES.contains(votedFor3))
+
+  val leaderAppendsNoopInElectionTerm =
+    (role1 != "Leader" or (lastLogIndex1 > 0 and lastLogTerm1 == currentTerm1)) and
+      (role2 != "Leader" or (lastLogIndex2 > 0 and lastLogTerm2 == currentTerm2)) and
+      (role3 != "Leader" or (lastLogIndex3 > 0 and lastLogTerm3 == currentTerm3))
+
+  val candidatesVoteForThemselves =
+    (role1 != "Candidate" or votedFor1 == 1) and
+      (role2 != "Candidate" or votedFor2 == 2) and
+      (role3 != "Candidate" or votedFor3 == 3)
 }

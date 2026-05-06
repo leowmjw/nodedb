@@ -46,7 +46,8 @@ Run the three-node election model directly:
 quint run quint/raft/SingleGroupElection.qnt \
   --max-samples 500 \
   --max-steps 20 \
-  --invariants electionSafety termMonotonic oneVotePerTerm
+  --invariants electionSafety termMonotonic oneVotePerTerm \
+    leaderAppendsNoopInElectionTerm candidatesVoteForThemselves
 ```
 
 Run the three-node election model against the Rust implementation:
@@ -61,7 +62,8 @@ Run the AppendEntries replication model directly:
 quint run quint/raft/SingleGroupReplication.qnt \
   --max-samples 500 \
   --max-steps 30 \
-  --invariants logMatching commitWithinLog appliedWithinCommit commitMonotonic stateMachineSafety
+  --invariants logMatching commitWithinLog appliedWithinCommit commitMonotonic \
+    leaderCommitsOnlyCurrentTermEntries followerCommittedPrefixesMatchLeader stateMachineSafety
 ```
 
 Run the AppendEntries replication model against the Rust implementation:

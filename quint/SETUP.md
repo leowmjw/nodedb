@@ -203,14 +203,16 @@ Keep model checks separate from scenario checks:
 quint run quint/raft/SingleGroupElection.qnt \
   --max-samples 500 \
   --max-steps 20 \
-  --invariants electionSafety termMonotonic oneVotePerTerm
+  --invariants electionSafety termMonotonic oneVotePerTerm \
+    leaderAppendsNoopInElectionTerm candidatesVoteForThemselves
 
 cargo test -p nodedb-raft election_matches_quint -- --nocapture
 
 quint run quint/raft/SingleGroupReplication.qnt \
   --max-samples 500 \
   --max-steps 30 \
-  --invariants logMatching commitWithinLog appliedWithinCommit commitMonotonic stateMachineSafety
+  --invariants logMatching commitWithinLog appliedWithinCommit commitMonotonic \
+    leaderCommitsOnlyCurrentTermEntries followerCommittedPrefixesMatchLeader stateMachineSafety
 
 cargo test -p nodedb-raft append_entries_replication_matches_quint -- --nocapture
 

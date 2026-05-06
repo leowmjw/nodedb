@@ -16,12 +16,14 @@
      behavior in nodedb-raft/src/node/rpc.rs:202. The Quint snapshot slice covers the compacted-peer path
      and successful apply at the boundary in quint/raft/Snapshots.qnt:103 and quint/raft/Snapshots.qnt:154,
      but it does not model stale snapshot rejection or partial/non-done chunks.
-  3. Some safety properties are tested indirectly, but not stated as model invariants.
-     Evidence: current invariants are election safety / one-vote-per-term in quint/raft/
-     SingleGroupElection.qnt:283, replication log/state-machine safety in quint/raft/
-     SingleGroupReplication.qnt:632, learner quorum exclusion in quint/raft/Learners.qnt:533, and restart
-     persistence checks in quint/raft/RestartPersistence.qnt:259. There is no explicit Quint invariant for
-     leader completeness or a broader “future leaders contain committed entries” property.
+  3. The model still lacks a fully integrated leader-completeness invariant, but the focused slices now
+     state more of their safety contract explicitly.
+     Evidence: quint/raft/SingleGroupElection.qnt now asserts elected-leader no-op and candidate
+     self-vote rules (`leaderAppendsNoopInElectionTerm`, `candidatesVoteForThemselves`), and quint/raft/
+     SingleGroupReplication.qnt now asserts current-term-only leader commit plus committed-prefix agreement
+     with the leader (`leaderCommitsOnlyCurrentTermEntries`, `followerCommittedPrefixesMatchLeader`). What
+     is still missing is one cross-slice invariant over a combined election+replication model that states a
+     future leader must contain every committed entry.
 
   Answer: no, I would not claim high confidence on complete Quint coverage of nodedb-raft.
 
@@ -38,7 +40,7 @@
 
   - Membership mutation surface in Rust is larger than the modeled surface.
   - Snapshot RPC semantics are only partially modeled.
-  - Some important Raft properties are checked by scenario shape, not as first-class invariants.
+  - Full leader completeness still is not checked by a first-class invariant over an integrated model.
   - The Quint suite is still mostly focused-slice modeling, not one integrated single-group model spanning
     election, repair, snapshots, restart, and membership together.
 
@@ -53,7 +55,7 @@
   1. Extend Learners.qnt or add MembershipChanges.qnt for add_peer, remove_peer, remove_learner,
      set_voters.
   2. Extend Snapshots.qnt with stale snapshot rejection and done = false no-apply behavior.
-  3. Add an explicit leader-completeness invariant over the election/replication model.
+  3. Add a single integrated election+replication slice with an explicit leader-completeness invariant.
 
 
 ## Completed May 04 2026

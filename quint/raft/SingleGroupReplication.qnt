@@ -629,6 +629,11 @@ module SingleGroupReplication {
   pure def sameTermImpliesSameEntryAt(a, b, i) =
     i == 0 or i > a.length() or i > b.length() or a[i - 1].term != b[i - 1].term or a[i - 1] == b[i - 1]
 
+  pure def prefixesMatchThrough(a, b, i) =
+    (i < 1 or sameEntryAt(a, b, 1)) and
+      (i < 2 or sameEntryAt(a, b, 2)) and
+      (i < 3 or sameEntryAt(a, b, 3))
+
   val commitWithinLog =
     commitIndex1 <= log1.length() and commitIndex2 <= log2.length() and commitIndex3 <= log3.length()
 
@@ -638,10 +643,16 @@ module SingleGroupReplication {
   val commitMonotonic =
     commitIndex1 >= 0 and commitIndex2 >= 0 and commitIndex3 >= 0
 
+  val leaderCommitsOnlyCurrentTermEntries =
+    commitIndex1 == 0 or termAt(log1, commitIndex1) == currentTerm1
+
   val logMatching =
     sameTermImpliesSameEntryAt(log1, log2, 1) and sameTermImpliesSameEntryAt(log1, log2, 2) and sameTermImpliesSameEntryAt(log1, log2, 3) and
       sameTermImpliesSameEntryAt(log1, log3, 1) and sameTermImpliesSameEntryAt(log1, log3, 2) and sameTermImpliesSameEntryAt(log1, log3, 3) and
       sameTermImpliesSameEntryAt(log2, log3, 1) and sameTermImpliesSameEntryAt(log2, log3, 2) and sameTermImpliesSameEntryAt(log2, log3, 3)
+
+  val followerCommittedPrefixesMatchLeader =
+    prefixesMatchThrough(log1, log2, commitIndex2) and prefixesMatchThrough(log1, log3, commitIndex3)
 
   val stateMachineSafety =
     sameEntryAt(log1.slice(0, lastApplied1), log2.slice(0, lastApplied2), 1) and
