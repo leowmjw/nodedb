@@ -4146,6 +4146,7 @@ dependencies = [
  "async-trait",
  "aws-config",
  "aws-sdk-kms",
+ "aws-smithy-http-client",
  "axum",
  "axum-server",
  "base64",

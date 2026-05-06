@@ -113,19 +113,18 @@ fn make_txclass(surr_a: u32, surr_b: u32) -> TxClass {
 /// - The epoch advanced from the pre-batch value to the post-batch value.
 /// - All 3 nodes' fan-out channels receive the expected transactions.
 /// - `epochs_applied` metric is consistent across nodes.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn scheduler_catchup_via_raft_log_replay() {
     let node_ids = vec![1u64, 2, 3];
     let nodes = spawn_with_sequencer(node_ids)
         .await
         .expect("spawn_with_sequencer");
 
-    // Wait for sequencer leader election. macOS needs extra headroom due to
-    // slower Raft heartbeat scheduling under debug builds.
+    // Wait for sequencer leader election.
     #[cfg(target_os = "linux")]
     let raft_timeout = Duration::from_secs(10);
     #[cfg(not(target_os = "linux"))]
-    let raft_timeout = Duration::from_secs(20);
+    let raft_timeout = Duration::from_secs(15);
 
     let leader_idx =
         wait_for_sequencer_leader(&nodes, raft_timeout, Duration::from_millis(50)).await;
@@ -205,31 +204,59 @@ async fn scheduler_catchup_via_raft_log_replay() {
         );
     }
 
-    // Submit post-batch txns to exercise the path further.
-    const POST_BATCH_TXNS: u32 = 4;
-    for i in 0..POST_BATCH_TXNS {
+    // Phase 1: check the condition FIRST, then submit if not met.
+    // Submitting before checking leaves a pending txn in the inbox when we
+    // break; the service then commits one more epoch, pushing the leader past
+    // the snapshotted target and causing Phase 2 to wait forever.
+    // Check-first guarantees the inbox is empty when we exit the loop.
+    let expected_min_epoch = pre_epoch_leader + 1;
+    let deadline = std::time::Instant::now() + raft_timeout;
+    let mut seq = 100u32;
+    loop {
+        if nodes[leader_idx]
+            .last_applied_epoch()
+            .map(|e| e >= expected_min_epoch)
+            .unwrap_or(false)
+        {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "timed out after {:?} waiting for leader to advance past epoch {pre_epoch_leader}",
+                raft_timeout
+            );
+        }
         inbox
-            .submit(make_txclass(100 + i * 2, 100 + i * 2 + 1))
-            .expect("post-batch submit");
+            .submit(make_txclass(seq, seq + 1))
+            .unwrap_or_default();
+        seq += 2;
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
-    // Wait for all 3 nodes to advance beyond the pre-batch epoch.
-    let expected_min_epoch = pre_epoch_leader + 1;
+    // Phase 2: wait until ALL nodes are at the SAME epoch >= expected_min_epoch.
+    // We don't snapshot a fixed target because the service may still be
+    // processing the last submitted txn; using a convergence condition avoids
+    // the moving-target race entirely. Once all nodes agree on the same epoch
+    // the system is stable (empty inbox → no further proposals).
     common::wait_for(
-        "all 3 nodes apply post-batch epochs",
+        "all 3 nodes converge to same post-batch epoch",
         raft_timeout,
         Duration::from_millis(20),
         || {
-            nodes.iter().all(|n| {
-                n.last_applied_epoch()
-                    .map(|e| e >= expected_min_epoch)
-                    .unwrap_or(false)
-            })
+            let epochs: Vec<Option<u64>> =
+                nodes.iter().map(|n| n.last_applied_epoch()).collect();
+            let all_advanced = epochs
+                .iter()
+                .all(|e| e.map(|v| v >= expected_min_epoch).unwrap_or(false));
+            if !all_advanced {
+                return false;
+            }
+            let first = epochs[0].unwrap();
+            epochs.iter().all(|e| *e == Some(first))
         },
     )
     .await;
 
-    // Final convergence check: all nodes must be at the same epoch.
     let post_epoch_leader = nodes[leader_idx]
         .last_applied_epoch()
         .expect("leader must have advanced epoch");
@@ -237,17 +264,6 @@ async fn scheduler_catchup_via_raft_log_replay() {
         post_epoch_leader > pre_epoch_leader,
         "epoch must advance after post-batch txns: pre={pre_epoch_leader} post={post_epoch_leader}"
     );
-
-    for (i, node) in nodes.iter().enumerate() {
-        let epoch = node
-            .last_applied_epoch()
-            .expect("every node must have applied post-batch epochs");
-        assert_eq!(
-            epoch, post_epoch_leader,
-            "node {i} post-batch epoch {epoch} != leader epoch {post_epoch_leader}; \
-             Raft log-replay catch-up produced inconsistent final state"
-        );
-    }
 
     // Verify that fan-out channels on at least one node received txns.
     // Drain whatever arrived — we care that the routing worked, not the count.

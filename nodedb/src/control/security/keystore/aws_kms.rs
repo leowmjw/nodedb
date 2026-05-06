@@ -229,8 +229,12 @@ mod tests {
     }
 
     fn make_provider_with_endpoint(port: u16, ciphertext_blob_path: PathBuf) -> AwsKmsProvider {
-        // Build the KMS config directly so the SDK never probes IMDS or the
-        // credential chain — both time out on non-EC2 hosts (e.g. macOS CI).
+        // Use a plain HTTP connector (no TLS) so the SDK never tries to load
+        // native root certificates. On macOS under parallel test load the
+        // Keychain is unavailable, causing rustls to debug_assert-panic with
+        // "no valid root certificates parsed". The mock endpoint is plain HTTP
+        // so TLS is not needed here.
+        let http_client = aws_smithy_http_client::Builder::new().build_http();
         let endpoint = format!("http://127.0.0.1:{port}");
         let config = aws_sdk_kms::Config::builder()
             .behavior_version(aws_sdk_kms::config::BehaviorVersion::latest())
@@ -239,6 +243,7 @@ mod tests {
             .credentials_provider(aws_sdk_kms::config::Credentials::new(
                 "AKID", "SECRET", None, None, "test",
             ))
+            .http_client(http_client)
             .build();
         let client = KmsClient::from_conf(config);
         AwsKmsProvider {

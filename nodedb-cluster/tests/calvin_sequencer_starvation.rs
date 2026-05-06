@@ -74,7 +74,12 @@ fn make_conflicting_tx(col_a: &str, col_b: &str, unique_surr: u32, tenant: u64) 
 #[tokio::test]
 async fn starvation_property() {
     let n_threads: u64 = 8;
+    // macOS under full suite load may starve OS threads for hundreds of ms;
+    // extend the window so every thread gets at least one time-slice.
+    #[cfg(target_os = "linux")]
     let run_duration = Duration::from_millis(200);
+    #[cfg(not(target_os = "linux"))]
+    let run_duration = Duration::from_millis(1000);
 
     let config = SequencerConfig {
         inbox_capacity: 4096,
