@@ -34,10 +34,10 @@ tokio = { workspace = true }
 fluxbench = { workspace = true }
 tracing-subscriber = { workspace = true }
 tempfile = "3"
+rand = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 io-uring = { workspace = true }
-rand = { workspace = true }
 
 [[bench]]
 name = "wal_throughput"
