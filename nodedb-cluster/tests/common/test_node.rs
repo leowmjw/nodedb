@@ -192,8 +192,14 @@ impl TestNode {
                 max_backoff_secs: 2,
             },
             swim_udp_addr: None,
+            #[cfg(target_os = "linux")]
             election_timeout_min: std::time::Duration::from_millis(150),
+            #[cfg(target_os = "linux")]
             election_timeout_max: std::time::Duration::from_millis(300),
+            #[cfg(not(target_os = "linux"))]
+            election_timeout_min: std::time::Duration::from_millis(500),
+            #[cfg(not(target_os = "linux"))]
+            election_timeout_max: std::time::Duration::from_millis(1000),
             install_snapshot_chunk_bytes: 4 * 1024 * 1024,
             orphan_partial_max_age_secs: 300,
         };

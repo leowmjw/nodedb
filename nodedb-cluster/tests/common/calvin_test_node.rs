@@ -238,8 +238,18 @@ async fn spawn_one_calvin_node(
             max_backoff_secs: 2,
         },
         swim_udp_addr: None,
+        // macOS under debug load misses heartbeats within 150ms, causing
+        // spurious re-elections that orphan the sequencer service (started
+        // on a fixed node). Longer timeouts keep the leader stable for the
+        // full test duration.
+        #[cfg(target_os = "linux")]
         election_timeout_min: Duration::from_millis(150),
+        #[cfg(target_os = "linux")]
         election_timeout_max: Duration::from_millis(300),
+        #[cfg(not(target_os = "linux"))]
+        election_timeout_min: Duration::from_millis(1000),
+        #[cfg(not(target_os = "linux"))]
+        election_timeout_max: Duration::from_millis(2000),
         install_snapshot_chunk_bytes: 4 * 1024 * 1024,
         orphan_partial_max_age_secs: 300,
     };

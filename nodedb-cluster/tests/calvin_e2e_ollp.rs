@@ -117,7 +117,7 @@ fn assert_fan_out_received(
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn ollp_bulk_update_txclass_admitted_and_fanned_out() {
     let node_ids = vec![1u64, 2, 3];
     let nodes = spawn_with_sequencer(node_ids)

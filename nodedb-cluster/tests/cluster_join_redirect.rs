@@ -50,11 +50,16 @@ async fn join_follows_leader_redirect_from_follower() {
         .await
         .expect("node 4 redirect-driven join");
 
-    // Within 10 s every node must see a 4-member topology.
+    // Within 20 s every node must see a 4-member topology (longer on macOS
+    // where election timeouts are 500/1000 ms instead of 150/300 ms).
     let all = [&node1, &node2, &node3, &node4];
+    #[cfg(target_os = "linux")]
+    let topo_timeout = Duration::from_secs(10);
+    #[cfg(not(target_os = "linux"))]
+    let topo_timeout = Duration::from_secs(20);
     wait_for(
         "all 4 nodes converge on topology_size == 4",
-        Duration::from_secs(10),
+        topo_timeout,
         Duration::from_millis(100),
         || all.iter().all(|n| n.topology_size() == 4),
     )
