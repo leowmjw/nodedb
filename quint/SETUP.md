@@ -216,12 +216,28 @@ quint run quint/raft/SingleGroupReplication.qnt \
 
 cargo test -p nodedb-raft append_entries_replication_matches_quint -- --nocapture
 
+quint run quint/raft/LeaderCompleteness.qnt \
+  --max-samples 200 \
+  --max-steps 18 \
+  --invariants electionSafety committedEntriesAgree leaderCompleteness \
+    candidatesVoteForThemselves leaderAppendsNoopInElectionTerm staleCandidateDenied
+
+cargo test -p nodedb-raft leader_completeness_matches_quint -- --nocapture
+
 quint run quint/raft/Learners.qnt \
   --max-samples 500 \
   --max-steps 24 \
   --invariants learnerExcludedFromQuorum learnerCannotLead learnerDoesNotVote learnerAckDoesNotCommit promotionOnlyAfterCatchUp logMatching
 
 cargo test -p nodedb-raft learners_and_membership_matches_quint -- --nocapture
+
+quint run quint/raft/MembershipChanges.qnt \
+  --max-samples 500 \
+  --max-steps 12 \
+  --invariants quorumMatchesVoters clusterSizeMatchesVoters trackedPeersMatchMembership \
+    untrackedPeersResetProgress newPeersStartAtLogEnd heartbeatTargetsMatchTrackedPeers
+
+cargo test -p nodedb-raft membership_changes_match_quint -- --nocapture
 
 quint run quint/raft/Snapshots.qnt \
   --max-samples 500 \

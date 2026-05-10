@@ -22,13 +22,17 @@ mod quint_connect_core;
 #[cfg(test)]
 mod quint_connect_election;
 #[cfg(test)]
+mod quint_connect_leader_completeness;
+#[cfg(test)]
 mod quint_connect_learners;
+#[cfg(test)]
+mod quint_connect_membership_changes;
 #[cfg(test)]
 mod quint_connect_replication;
 #[cfg(test)]
-mod quint_connect_snapshots;
-#[cfg(test)]
 mod quint_connect_restart;
+#[cfg(test)]
+mod quint_connect_snapshots;
 
 pub use self::config::RaftConfig;
 pub use self::core::{RaftNode, Ready};

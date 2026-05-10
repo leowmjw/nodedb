@@ -364,7 +364,11 @@ fn model_role(role: NodeRole) -> String {
     .to_string()
 }
 
-#[quint_run(spec = "../quint/raft/Snapshots.qnt", max_steps = 12, max_samples = 100)]
+#[quint_run(
+    spec = "../quint/raft/Snapshots.qnt",
+    max_steps = 12,
+    max_samples = 100
+)]
 fn snapshots_match_quint() -> impl Driver {
     SnapshotDriver::default()
 }

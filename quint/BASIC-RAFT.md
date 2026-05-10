@@ -1,29 +1,22 @@
 # Basic Raft
 
-## Updated: May 05, 2026
+## Updated: May 10, 2026
 
 • Findings first:
 
-  1. The Quint model does not fully cover dynamic voter membership in nodedb-raft.
-     Evidence: Rust has set_voters, add_peer, remove_peer, and remove_learner in nodedb-raft/src/node/
-     membership.rs:17, nodedb-raft/src/node/membership.rs:59, nodedb-raft/src/node/membership.rs:72,
-     nodedb-raft/src/node/membership.rs:117. The Quint membership slice only has AddLearner,
-     PromoteLearner, and PromoteSelf in quint/raft/Learners.qnt:195, quint/raft/Learners.qnt:445, quint/
-     raft/Learners.qnt:476. So removal and direct voter-set mutation are only Rust-unit-tested, not part of
-     the executable protocol contract.
-  2. Snapshot coverage is partial, not complete.
+  1. Snapshot coverage is partial, not complete.
      Evidence: handle_install_snapshot has lower-term rejection, higher-term stepdown, and done-gated apply
      behavior in nodedb-raft/src/node/rpc.rs:202. The Quint snapshot slice covers the compacted-peer path
      and successful apply at the boundary in quint/raft/Snapshots.qnt:103 and quint/raft/Snapshots.qnt:154,
      but it does not model stale snapshot rejection or partial/non-done chunks.
-  3. The model still lacks a fully integrated leader-completeness invariant, but the focused slices now
-     state more of their safety contract explicitly.
-     Evidence: quint/raft/SingleGroupElection.qnt now asserts elected-leader no-op and candidate
-     self-vote rules (`leaderAppendsNoopInElectionTerm`, `candidatesVoteForThemselves`), and quint/raft/
-     SingleGroupReplication.qnt now asserts current-term-only leader commit plus committed-prefix agreement
-     with the leader (`leaderCommitsOnlyCurrentTermEntries`, `followerCommittedPrefixesMatchLeader`). What
-     is still missing is one cross-slice invariant over a combined election+replication model that states a
-     future leader must contain every committed entry.
+  2. Leader completeness now has an executable integrated slice, but it is still narrower than a full
+     all-features single-group model.
+     Evidence: quint/raft/LeaderCompleteness.qnt combines leader-term replication/commit with a later
+     election and checks `leaderCompleteness` over the committed prefix, alongside
+     `committedEntriesAgree`, `candidatesVoteForThemselves`, and elected-leader no-op behavior. This
+     closes the earlier cross-slice gap between `SingleGroupElection.qnt` and
+     `SingleGroupReplication.qnt`, even though snapshots, restart, and membership are still modeled in
+     separate focused slices rather than one unified state machine.
 
   Answer: no, I would not claim high confidence on complete Quint coverage of nodedb-raft.
 
@@ -34,13 +27,12 @@
   - AppendEntries rejection/repair, stale AE responses, heartbeat commit propagation, current-term-only
     commit: quint/raft/SingleGroupReplication.qnt:343, quint/raft/SingleGroupReplication.qnt:392
   - Learner exclusion from quorum and promotion catch-up rule: quint/raft/Learners.qnt:533
+  - Direct voter/learner mutation and leader tracking updates: quint/raft/MembershipChanges.qnt:1
   - Restart persistence of hard state and post-snapshot log restore: quint/raft/RestartPersistence.qnt:185
 
   Why confidence is not “complete”:
 
-  - Membership mutation surface in Rust is larger than the modeled surface.
   - Snapshot RPC semantics are only partially modeled.
-  - Full leader completeness still is not checked by a first-class invariant over an integrated model.
   - The Quint suite is still mostly focused-slice modeling, not one integrated single-group model spanning
     election, repair, snapshots, restart, and membership together.
 
@@ -52,10 +44,9 @@
 
   If you want to close the remaining gap, the next three additions should be:
 
-  1. Extend Learners.qnt or add MembershipChanges.qnt for add_peer, remove_peer, remove_learner,
-     set_voters.
-  2. Extend Snapshots.qnt with stale snapshot rejection and done = false no-apply behavior.
-  3. Add a single integrated election+replication slice with an explicit leader-completeness invariant.
+  1. Extend Snapshots.qnt with stale snapshot rejection and done = false no-apply behavior.
+  2. Integrate snapshots, restart, and membership with the new leader-completeness slice if you want one
+     broader single-group model instead of separate focused models.
 
 
 ## Completed May 04 2026

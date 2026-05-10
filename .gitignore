@@ -35,7 +35,11 @@
 resource
 AGENTS.md
 CLAUDE.md
+
+# Ignore LLM config
 .codex
+.claude
+.zed
 
 # OS-specific
 .DS_Store

@@ -4,7 +4,9 @@ use std::time::{Duration, Instant};
 use quint_connect::{Driver, Result, State, Step, quint_run, switch};
 use serde::Deserialize;
 
-use crate::message::{AppendEntriesRequest, AppendEntriesResponse, LogEntry, RequestVoteRequest};
+use crate::message::{
+    AppendEntriesRequest, AppendEntriesResponse, LogEntry, RequestVoteRequest, RequestVoteResponse,
+};
 use crate::node::config::RaftConfig;
 use crate::node::core::RaftNode;
 use crate::state::{LeaderState, NodeRole};
@@ -40,6 +42,23 @@ struct ModelAppendEntriesResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ModelRequestVote {
+    term: i64,
+    candidate_id: i64,
+    last_log_index: i64,
+    last_log_term: i64,
+    group_id: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelRequestVoteResponse {
+    term: i64,
+    vote_granted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ModelAppendEnvelope {
     src: i64,
     dst: i64,
@@ -56,6 +75,22 @@ struct ModelAppendResponseEnvelope {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ModelVoteRequestEnvelope {
+    src: i64,
+    dst: i64,
+    req: ModelRequestVote,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelVoteResponseEnvelope {
+    src: i64,
+    dst: i64,
+    resp: ModelRequestVoteResponse,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ModelState {
     role1: String,
     role2: String,
@@ -63,6 +98,9 @@ struct ModelState {
     current_term1: i64,
     current_term2: i64,
     current_term3: i64,
+    voted_for1: i64,
+    voted_for2: i64,
+    voted_for3: i64,
     leader_id1: i64,
     leader_id2: i64,
     leader_id3: i64,
@@ -76,49 +114,43 @@ struct ModelState {
     next_index3: i64,
     match_index2: i64,
     match_index3: i64,
-    learner3: bool,
-    voter3: bool,
-    promoted3: bool,
-    starts_as_learner3: bool,
-    learner_vote_granted: bool,
     append_messages: Vec<ModelAppendEnvelope>,
     append_responses: Vec<ModelAppendResponseEnvelope>,
+    vote_requests: Vec<ModelVoteRequestEnvelope>,
+    vote_responses: Vec<ModelVoteResponseEnvelope>,
+    votes_received1: Vec<i64>,
+    votes_received2: Vec<i64>,
+    votes_received3: Vec<i64>,
 }
 
 #[derive(Default)]
-struct LearnerDriver {
+struct LeaderCompletenessDriver {
     nodes: HashMap<u64, RaftNode<MemStorage>>,
     append_messages: Vec<ModelAppendEnvelope>,
     append_responses: Vec<ModelAppendResponseEnvelope>,
-    learner_vote_granted: bool,
-    promoted3: bool,
+    vote_requests: Vec<ModelVoteRequestEnvelope>,
+    vote_responses: Vec<ModelVoteResponseEnvelope>,
 }
 
-impl Driver for LearnerDriver {
+impl Driver for LeaderCompletenessDriver {
     type State = ModelState;
 
     fn step(&mut self, step: &Step) -> Result {
         switch!(step {
             init => self.init()?,
-            AddLearner => self.add_learner()?,
-            AddVoter => self.add_voter()?,
-            RemoveLearner => self.remove_learner()?,
-            RemoveVoter => self.remove_voter()?,
-            ClientPropose => self.client_propose()?,
             TickHeartbeat => self.tick_heartbeat()?,
             HandleAppendEntries => self.handle_append_entries()?,
             HandleAppendEntriesResponse => self.handle_append_entries_response()?,
-            RequestVoteAtLearner => self.request_vote_at_learner()?,
-            TickLearnerElectionTimeout => self.tick_learner_election_timeout()?,
-            PromoteLearner => self.promote_learner()?,
-            PromoteSelf => self.promote_self()?,
+            TickElectionTimeout(n) => self.tick_election_timeout(n)?,
+            HandleRequestVote => self.handle_request_vote()?,
+            HandleRequestVoteResponse => self.handle_request_vote_response()?,
             Noop => (),
         })
     }
 }
 
-impl State<LearnerDriver> for ModelState {
-    fn from_driver(driver: &LearnerDriver) -> Result<Self> {
+impl State<LeaderCompletenessDriver> for ModelState {
+    fn from_driver(driver: &LeaderCompletenessDriver) -> Result<Self> {
         let n1 = driver.node(1)?;
         let n2 = driver.node(2)?;
         let n3 = driver.node(3)?;
@@ -130,6 +162,9 @@ impl State<LearnerDriver> for ModelState {
             current_term1: n1.hard_state.current_term as i64,
             current_term2: n2.hard_state.current_term as i64,
             current_term3: n3.hard_state.current_term as i64,
+            voted_for1: n1.hard_state.voted_for as i64,
+            voted_for2: n2.hard_state.voted_for as i64,
+            voted_for3: n3.hard_state.voted_for as i64,
             leader_id1: n1.leader_id as i64,
             leader_id2: n2.leader_id as i64,
             leader_id3: n3.leader_id as i64,
@@ -143,24 +178,24 @@ impl State<LearnerDriver> for ModelState {
             next_index3: next_index(n1, 3) as i64,
             match_index2: match_index(n1, 2) as i64,
             match_index3: match_index(n1, 3) as i64,
-            learner3: n1.learners().contains(&3),
-            voter3: n1.voters().contains(&3),
-            promoted3: driver.promoted3,
-            starts_as_learner3: n3.config.starts_as_learner,
-            learner_vote_granted: driver.learner_vote_granted,
             append_messages: driver.append_messages.clone(),
             append_responses: driver.append_responses.clone(),
+            vote_requests: driver.vote_requests.clone(),
+            vote_responses: driver.vote_responses.clone(),
+            votes_received1: sorted_votes(n1),
+            votes_received2: sorted_votes(n2),
+            votes_received3: sorted_votes(n3),
         })
     }
 }
 
-impl LearnerDriver {
+impl LeaderCompletenessDriver {
     fn init(&mut self) -> Result {
         self.nodes.clear();
         self.append_messages.clear();
         self.append_responses.clear();
-        self.learner_vote_granted = false;
-        self.promoted3 = false;
+        self.vote_requests.clear();
+        self.vote_responses.clear();
 
         for node_id in [1, 2, 3] {
             let mut node = RaftNode::new(config(node_id), MemStorage::new());
@@ -168,66 +203,34 @@ impl LearnerDriver {
             self.nodes.insert(node_id, node);
         }
 
-        let noop = LogEntry {
-            term: 1,
-            index: 1,
-            data: Vec::new(),
-        };
-
         let leader = self.node_mut(1)?;
         leader.role = NodeRole::Leader;
         leader.hard_state.current_term = 1;
         leader.hard_state.voted_for = 1;
         leader.leader_id = 1;
-        leader.volatile.commit_index = 1;
-        leader.ready_commit_index = 1;
-        leader.leader_state = Some(LeaderState::new(&[2], 1));
-        leader.log.append(noop.clone())?;
+        leader.leader_state = Some(LeaderState::new(&[2, 3], 2));
+        leader.log.append(LogEntry {
+            term: 1,
+            index: 1,
+            data: Vec::new(),
+        })?;
+        leader.log.append(LogEntry {
+            term: 1,
+            index: 2,
+            data: vec![7],
+        })?;
         if let Some(leader_state) = leader.leader_state.as_mut() {
-            leader_state.set_match_index(2, 1);
-            leader_state.set_next_index(2, 2);
+            leader_state.set_next_index(2, 1);
+            leader_state.set_next_index(3, 1);
         }
 
-        let voter = self.node_mut(2)?;
-        voter.hard_state.current_term = 1;
-        voter.leader_id = 1;
-        voter.volatile.commit_index = 1;
-        voter.ready_commit_index = 1;
-        voter.log.append(noop)?;
+        let follower2 = self.node_mut(2)?;
+        follower2.hard_state.current_term = 1;
+        follower2.leader_id = 1;
 
-        let learner = self.node_mut(3)?;
-        learner.hard_state.current_term = 1;
+        let follower3 = self.node_mut(3)?;
+        follower3.hard_state.current_term = 1;
 
-        Ok(())
-    }
-
-    fn add_learner(&mut self) -> Result {
-        self.node_mut(1)?.add_learner(3);
-        self.promoted3 = false;
-        Ok(())
-    }
-
-    fn add_voter(&mut self) -> Result {
-        self.node_mut(1)?.add_peer(3);
-        self.promoted3 = false;
-        Ok(())
-    }
-
-    fn remove_learner(&mut self) -> Result {
-        self.node_mut(1)?.remove_learner(3);
-        self.promoted3 = false;
-        Ok(())
-    }
-
-    fn remove_voter(&mut self) -> Result {
-        self.node_mut(1)?.remove_peer(3);
-        self.promoted3 = false;
-        Ok(())
-    }
-
-    fn client_propose(&mut self) -> Result {
-        self.node_mut(1)?.propose(vec![7])?;
-        self.drain_append_messages(1);
         Ok(())
     }
 
@@ -241,6 +244,7 @@ impl LearnerDriver {
         let msg = self.append_messages.remove(0);
         let req = rust_append_entries(&msg.req);
         let resp = self.node_mut(msg.dst as u64)?.handle_append_entries(&req);
+        self.node_mut(msg.dst as u64)?.persist_ready_hard_state()?;
         self.append_responses.push(ModelAppendResponseEnvelope {
             src: msg.dst,
             dst: msg.src,
@@ -256,39 +260,49 @@ impl LearnerDriver {
             success: msg.resp.success,
             last_log_index: msg.resp.last_log_index as u64,
         };
-        self.node_mut(msg.dst as u64)?
+        let dst = msg.dst as u64;
+        self.node_mut(dst)?
             .handle_append_entries_response(msg.src as u64, &resp);
-        self.drain_append_messages(msg.dst as u64);
+        self.node_mut(dst)?.persist_ready_hard_state()?;
+        self.drain_append_messages(dst);
         Ok(())
     }
 
-    fn request_vote_at_learner(&mut self) -> Result {
-        let req = RequestVoteRequest {
-            term: self.node(3)?.hard_state.current_term + 1,
-            candidate_id: 2,
-            last_log_index: 10,
-            last_log_term: 10,
-            group_id: 1,
+    fn tick_election_timeout(&mut self, n: i64) -> Result {
+        let node_id = n as u64;
+        let node = self.node_mut(node_id)?;
+        node.election_deadline_override(Instant::now() - Duration::from_millis(1));
+        node.tick();
+        node.persist_ready_hard_state()?;
+        self.drain_vote_requests(node_id);
+        self.drain_append_messages(node_id);
+        Ok(())
+    }
+
+    fn handle_request_vote(&mut self) -> Result {
+        let msg = self.vote_requests.remove(0);
+        let req = rust_vote_request(&msg.req);
+        let resp = self.node_mut(msg.dst as u64)?.handle_request_vote(&req);
+        self.node_mut(msg.dst as u64)?.persist_ready_hard_state()?;
+        self.vote_responses.push(ModelVoteResponseEnvelope {
+            src: msg.dst,
+            dst: msg.src,
+            resp: model_vote_response(resp),
+        });
+        Ok(())
+    }
+
+    fn handle_request_vote_response(&mut self) -> Result {
+        let msg = self.vote_responses.remove(0);
+        let resp = RequestVoteResponse {
+            term: msg.resp.term as u64,
+            vote_granted: msg.resp.vote_granted,
         };
-        let resp = self.node_mut(3)?.handle_request_vote(&req);
-        self.learner_vote_granted = resp.vote_granted;
-        Ok(())
-    }
-
-    fn tick_learner_election_timeout(&mut self) -> Result {
-        let learner = self.node_mut(3)?;
-        learner.election_deadline_override(Instant::now() - Duration::from_millis(1));
-        learner.tick();
-        Ok(())
-    }
-
-    fn promote_learner(&mut self) -> Result {
-        self.promoted3 = self.node_mut(1)?.promote_learner(3);
-        Ok(())
-    }
-
-    fn promote_self(&mut self) -> Result {
-        self.node_mut(3)?.promote_self_to_voter();
+        let dst = msg.dst as u64;
+        self.node_mut(dst)?
+            .handle_request_vote_response(msg.src as u64, &resp);
+        self.node_mut(dst)?.persist_ready_hard_state()?;
+        self.drain_vote_requests(dst);
         Ok(())
     }
 
@@ -300,6 +314,17 @@ impl LearnerDriver {
             std::mem::take(&mut node.ready.messages)
                 .into_iter()
                 .map(|(dst, req)| model_append_request(src, dst, req)),
+        );
+    }
+
+    fn drain_vote_requests(&mut self, src: u64) {
+        let Some(node) = self.nodes.get_mut(&src) else {
+            return;
+        };
+        self.vote_requests.extend(
+            std::mem::take(&mut node.ready.vote_requests)
+                .into_iter()
+                .map(|(dst, req)| model_vote_request(src, dst, req)),
         );
     }
 
@@ -317,17 +342,14 @@ impl LearnerDriver {
 }
 
 fn config(node_id: u64) -> RaftConfig {
+    let peers = [1, 2, 3].into_iter().filter(|id| *id != node_id).collect();
+
     RaftConfig {
         node_id,
         group_id: 1,
-        peers: match node_id {
-            1 => vec![2],
-            2 => vec![1],
-            3 => vec![1, 2],
-            _ => vec![],
-        },
+        peers,
         learners: vec![],
-        starts_as_learner: node_id == 3,
+        starts_as_learner: false,
         election_timeout_min: Duration::from_millis(150),
         election_timeout_max: Duration::from_millis(300),
         heartbeat_interval: Duration::from_millis(50),
@@ -403,6 +425,48 @@ fn model_append_response(resp: AppendEntriesResponse) -> ModelAppendEntriesRespo
     }
 }
 
+fn model_vote_request(src: u64, dst: u64, req: RequestVoteRequest) -> ModelVoteRequestEnvelope {
+    ModelVoteRequestEnvelope {
+        src: src as i64,
+        dst: dst as i64,
+        req: ModelRequestVote {
+            term: req.term as i64,
+            candidate_id: req.candidate_id as i64,
+            last_log_index: req.last_log_index as i64,
+            last_log_term: req.last_log_term as i64,
+            group_id: req.group_id as i64,
+        },
+    }
+}
+
+fn rust_vote_request(req: &ModelRequestVote) -> RequestVoteRequest {
+    RequestVoteRequest {
+        term: req.term as u64,
+        candidate_id: req.candidate_id as u64,
+        last_log_index: req.last_log_index as u64,
+        last_log_term: req.last_log_term as u64,
+        group_id: req.group_id as u64,
+    }
+}
+
+fn model_vote_response(resp: RequestVoteResponse) -> ModelRequestVoteResponse {
+    ModelRequestVoteResponse {
+        term: resp.term as i64,
+        vote_granted: resp.vote_granted,
+    }
+}
+
+fn sorted_votes(node: &RaftNode<MemStorage>) -> Vec<i64> {
+    let mut votes: Vec<_> = node
+        .votes_received
+        .iter()
+        .copied()
+        .map(|id| id as i64)
+        .collect();
+    votes.sort_unstable();
+    votes
+}
+
 fn next_index(node: &RaftNode<MemStorage>, peer: u64) -> u64 {
     node.leader_state
         .as_ref()
@@ -427,7 +491,11 @@ fn model_role(role: NodeRole) -> String {
     .to_string()
 }
 
-#[quint_run(spec = "../quint/raft/Learners.qnt", max_steps = 24, max_samples = 100)]
-fn learners_and_membership_matches_quint() -> impl Driver {
-    LearnerDriver::default()
+#[quint_run(
+    spec = "../quint/raft/LeaderCompleteness.qnt",
+    max_steps = 18,
+    max_samples = 100
+)]
+fn leader_completeness_matches_quint() -> impl Driver {
+    LeaderCompletenessDriver::default()
 }
