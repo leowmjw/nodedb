@@ -29,6 +29,11 @@ use crate::error::{Result, WalError};
 use crate::preamble::SegmentPreamble;
 use crate::record::{HEADER_SIZE, WalRecord};
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const DIRECT_IO_FLAG: i32 = libc::O_DIRECT;
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+const DIRECT_IO_FLAG: i32 = 0;
+
 /// Default write buffer size: 2 MiB.
 ///
 /// This is the batch size for group commit. Records accumulate here until
@@ -138,7 +143,7 @@ impl WalWriter {
 
         if config.use_direct_io {
             // O_DIRECT: bypass page cache.
-            opts.custom_flags(libc::O_DIRECT);
+            opts.custom_flags(DIRECT_IO_FLAG);
         }
 
         let file = opts.open(path)?;
@@ -226,7 +231,7 @@ impl WalWriter {
         opts.create(true).write(true).append(false);
 
         if config.use_direct_io {
-            opts.custom_flags(libc::O_DIRECT);
+            opts.custom_flags(DIRECT_IO_FLAG);
         }
 
         let file = opts.open(path)?;

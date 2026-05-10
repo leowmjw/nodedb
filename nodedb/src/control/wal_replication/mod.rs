@@ -19,4 +19,7 @@ pub use crate::control::distributed_applier::{
 };
 
 #[cfg(test)]
+mod quint_connect_apply_ack_identity;
+
+#[cfg(test)]
 mod tests;

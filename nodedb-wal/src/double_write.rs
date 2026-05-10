@@ -46,6 +46,11 @@ use crate::align::{AlignedBuf, DEFAULT_ALIGNMENT, is_aligned};
 use crate::error::{Result, WalError};
 use crate::record::{HEADER_SIZE, RecordHeader, WAL_MAGIC, WalRecord};
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const DIRECT_IO_FLAG: i32 = libc::O_DIRECT;
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+const DIRECT_IO_FLAG: i32 = 0;
+
 /// Maximum number of records kept in the double-write buffer.
 /// Only the most recent records matter — torn writes affect the tail.
 ///
@@ -167,7 +172,7 @@ impl DoubleWriteBuffer {
         let mut opts = OpenOptions::new();
         opts.read(true).write(true).create(true).truncate(false);
         if mode == DwbMode::Direct {
-            opts.custom_flags(libc::O_DIRECT);
+            opts.custom_flags(DIRECT_IO_FLAG);
         }
 
         let file = opts.open(path).map_err(|e| {

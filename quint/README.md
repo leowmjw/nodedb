@@ -136,6 +136,23 @@ Run the focused Multi-Raft model against the Rust implementation:
 cargo test -p nodedb-cluster multiraft_matches_quint -- --nocapture
 ```
 
+Run the focused Join model directly:
+
+```sh
+quint run quint/raft/Join.qnt \
+  --max-samples 500 \
+  --max-steps 10 \
+  --invariants successfulJoinMeansLearnerEverywhere joinNeverPromotesDirectly \
+    redirectDoesNotMutate idempotentDoesNotMutate conflictDoesNotMutate \
+    successResponseCarriesAllGroups
+```
+
+Run the focused Join model against the Rust implementation:
+
+```sh
+cargo test -p nodedb-cluster join_matches_quint -- --nocapture
+```
+
 Run the snapshot model directly:
 
 ```sh
@@ -193,6 +210,9 @@ cargo test -p nodedb-raft
 - `raft/MultiRaft.qnt`: focused cluster-side model for mounted-group count,
   stable vShard routing, per-group role/status independence, and correct
   proposal routing across local groups.
+- `raft/Join.qnt`: focused join-orchestration model for metadata-leader
+  redirect, new learner admission across every group, idempotent re-join, and
+  same-id/different-address rejection.
 - `raft/Snapshots.qnt`: focused snapshot catch-up model with compacted leader
   log boundary, `snapshots_needed`, `InstallSnapshot`, and follower
   commit/applied advancement after snapshot apply.
@@ -213,6 +233,8 @@ cargo test -p nodedb-raft
   for the direct membership-mutation model.
 - `../nodedb-cluster/src/multi_raft/quint_connect_multiraft.rs`: Rust driver
   for the focused Multi-Raft model.
+- `../nodedb-cluster/src/raft_loop/quint_connect_join.rs`: Rust driver for the
+  focused join-orchestration model.
 - `../nodedb-raft/src/node/quint_connect_snapshots.rs`: Rust driver for the
   snapshot catch-up model.
 - `../nodedb-raft/src/node/quint_connect_restart.rs`: Rust driver for the

@@ -18,4 +18,7 @@ pub mod join;
 pub mod loop_core;
 pub mod tick;
 
+#[cfg(test)]
+mod quint_connect_join;
+
 pub use loop_core::{CommitApplier, RaftLoop, SnapshotQuarantineHook, VShardEnvelopeHandler};

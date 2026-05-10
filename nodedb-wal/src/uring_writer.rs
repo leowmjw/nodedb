@@ -26,6 +26,11 @@ use crate::align::{AlignedBuf, DEFAULT_ALIGNMENT};
 use crate::error::{Result, WalError};
 use crate::record::{HEADER_SIZE, WalRecord};
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const DIRECT_IO_FLAG: i32 = libc::O_DIRECT;
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+const DIRECT_IO_FLAG: i32 = 0;
+
 /// io_uring WAL writer configuration.
 #[derive(Debug, Clone)]
 pub struct UringWriterConfig {
@@ -79,7 +84,7 @@ impl UringWriter {
         opts.create(true).write(true).read(true);
 
         if config.use_direct_io {
-            opts.custom_flags(libc::O_DIRECT);
+            opts.custom_flags(DIRECT_IO_FLAG);
         }
 
         let file = opts.open(path)?;

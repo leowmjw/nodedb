@@ -45,7 +45,10 @@ enum TrackerSlot {
     },
     /// `complete()` was called before `register()`. Stored so `register()`
     /// can resolve the channel immediately.
-    Completed(ProposeResult),
+    Completed {
+        result: ProposeResult,
+        applied_key: u64,
+    },
 }
 
 /// Tracks pending proposals awaiting Raft commit.
@@ -108,11 +111,37 @@ impl ProposeTracker {
             }
             Entry::Occupied(e) => {
                 match e.get() {
-                    TrackerSlot::Completed(_) => {
+                    TrackerSlot::Completed { .. } => {
                         // complete() already fired — extract the result, resolve
                         // the receiver immediately, and clean up the slot.
-                        if let TrackerSlot::Completed(result) = e.remove() {
-                            let _ = tx.send(result);
+                        // If the completed entry's key differs from the
+                        // proposer's expected key, surface the same retryable
+                        // signal we would have produced had the waiter already
+                        // been present when complete() fired.
+                        if let TrackerSlot::Completed {
+                            result,
+                            applied_key,
+                        } = e.remove()
+                        {
+                            let mismatch =
+                                applied_key != 0 && expected_key != 0 && applied_key != expected_key;
+                            let final_result = if mismatch {
+                                tracing::warn!(
+                                    group_id,
+                                    log_index,
+                                    applied_key,
+                                    expected_key,
+                                    "raft entry completed before waiter registration with a \
+                                     different idempotency_key; surfacing RetryableLeaderChange"
+                                );
+                                Err(crate::Error::RetryableLeaderChange {
+                                    group_id,
+                                    log_index,
+                                })
+                            } else {
+                                result
+                            };
+                            let _ = tx.send(final_result);
                         }
                     }
                     TrackerSlot::Waiting { .. } => {
@@ -155,7 +184,7 @@ impl ProposeTracker {
         match slots.entry((group_id, log_index)) {
             Entry::Vacant(e) => {
                 // No waiter yet — store result for the upcoming register().
-                e.insert(TrackerSlot::Completed(result));
+                e.insert(TrackerSlot::Completed { result, applied_key });
                 false
             }
             Entry::Occupied(e) => {
@@ -195,11 +224,11 @@ impl ProposeTracker {
                             return true;
                         }
                     }
-                    TrackerSlot::Completed(_) => {
+                    TrackerSlot::Completed { .. } => {
                         // Already completed — overwrite with newer result.
                         // Duplicate completes should not occur in practice;
                         // last write wins.
-                        *e.into_mut() = TrackerSlot::Completed(result);
+                        *e.into_mut() = TrackerSlot::Completed { result, applied_key };
                     }
                 }
                 false

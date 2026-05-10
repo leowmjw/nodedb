@@ -23,6 +23,16 @@ use std::path::Path;
 
 use crate::error::{Result, WalError};
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn checkpoint_dontneed(fd: std::os::unix::io::RawFd, len: u64) -> i32 {
+    unsafe { libc::posix_fadvise(fd, 0, len as libc::off_t, libc::POSIX_FADV_DONTNEED) }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn checkpoint_dontneed(_fd: std::os::unix::io::RawFd, _len: u64) -> i32 {
+    0
+}
+
 /// Fsync a directory to ensure file creation/deletion metadata is durable.
 ///
 /// On ext4/XFS, creating or deleting a file writes the file data to disk
@@ -104,14 +114,7 @@ pub fn read_checkpoint_dontneed(path: &Path) -> Result<Vec<u8>> {
     {
         // Safe: `file` owns the fd for the duration of the call; len fits in
         // off_t on all supported platforms (checkpoint files are << i64::MAX).
-        let ret = unsafe {
-            libc::posix_fadvise(
-                file.as_raw_fd(),
-                0,
-                len as libc::off_t,
-                libc::POSIX_FADV_DONTNEED,
-            )
-        };
+        let ret = checkpoint_dontneed(file.as_raw_fd(), len);
         if ret != 0 {
             tracing::debug!(
                 path = %path.display(),

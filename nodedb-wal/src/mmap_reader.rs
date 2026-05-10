@@ -50,6 +50,7 @@ fn fadv_dontneed(fd: &std::fs::File, len: usize, path: &Path) {
     if len == 0 {
         return;
     }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     let rc = unsafe {
         libc::posix_fadvise(
             fd.as_raw_fd(),
@@ -58,14 +59,23 @@ fn fadv_dontneed(fd: &std::fs::File, len: usize, path: &Path) {
             libc::POSIX_FADV_DONTNEED,
         )
     };
-    if rc == 0 {
-        test_hooks::FADV_DONTNEED_COUNT.fetch_add(1, Ordering::Relaxed);
-    } else {
-        tracing::warn!(
-            path = %path.display(),
-            errno = rc,
-            "posix_fadvise(DONTNEED) failed on exhausted WAL segment",
-        );
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let rc = {
+        let _ = fd;
+        let _ = len;
+        let _ = path;
+        0
+    };
+    if cfg!(any(target_os = "linux", target_os = "android")) {
+        if rc == 0 {
+            test_hooks::FADV_DONTNEED_COUNT.fetch_add(1, Ordering::Relaxed);
+        } else {
+            tracing::warn!(
+                path = %path.display(),
+                errno = rc,
+                "posix_fadvise(DONTNEED) failed on exhausted WAL segment",
+            );
+        }
     }
 }
 

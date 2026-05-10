@@ -139,6 +139,38 @@ fn propose_tracker_key_mismatch_surfaces_retryable_leader_change() {
 }
 
 #[test]
+fn propose_tracker_late_register_key_mismatch_surfaces_retryable_leader_change() {
+    let tracker = ProposeTracker::new();
+
+    // Apply won the race and stored a completed result for another
+    // proposer's entry at the same (group_id, log_index).
+    assert!(!tracker.complete(1, 5, 0xbbbb, Ok(b"other-proposers-payload".to_vec())));
+
+    let mut rx = tracker.register(1, 5, 0xaaaa);
+    let result = rx.try_recv().unwrap();
+    match result {
+        Err(crate::Error::RetryableLeaderChange {
+            group_id,
+            log_index,
+        }) => {
+            assert_eq!(group_id, 1);
+            assert_eq!(log_index, 5);
+        }
+        other => panic!("expected RetryableLeaderChange, got {other:?}"),
+    }
+}
+
+#[test]
+fn propose_tracker_late_register_matching_key_preserves_success() {
+    let tracker = ProposeTracker::new();
+    assert!(!tracker.complete(1, 5, 0xaaaa, Ok(b"result".to_vec())));
+
+    let mut rx = tracker.register(1, 5, 0xaaaa);
+    let result = rx.try_recv().unwrap();
+    assert_eq!(result.unwrap(), b"result");
+}
+
+#[test]
 fn propose_tracker_zero_applied_key_passes_through_explicit_error() {
     // Empty raft entries (leader-change no-ops) carry no idempotency
     // key. The applier passes `applied_key = 0` together with an

@@ -247,6 +247,15 @@ quint run quint/raft/MultiRaft.qnt \
 
 cargo test -p nodedb-cluster multiraft_matches_quint -- --nocapture
 
+quint run quint/raft/Join.qnt \
+  --max-samples 500 \
+  --max-steps 10 \
+  --invariants successfulJoinMeansLearnerEverywhere joinNeverPromotesDirectly \
+    redirectDoesNotMutate idempotentDoesNotMutate conflictDoesNotMutate \
+    successResponseCarriesAllGroups
+
+cargo test -p nodedb-cluster join_matches_quint -- --nocapture
+
 quint run quint/raft/Snapshots.qnt \
   --max-samples 500 \
   --max-steps 12 \
