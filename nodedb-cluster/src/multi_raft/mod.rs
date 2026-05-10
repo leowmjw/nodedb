@@ -18,4 +18,7 @@ pub mod core;
 pub mod membership;
 pub mod rpc_dispatch;
 
+#[cfg(test)]
+mod quint_connect_multiraft;
+
 pub use core::{GroupStatus, MultiRaft, MultiRaftReady};

@@ -239,6 +239,14 @@ quint run quint/raft/MembershipChanges.qnt \
 
 cargo test -p nodedb-raft membership_changes_match_quint -- --nocapture
 
+quint run quint/raft/MultiRaft.qnt \
+  --max-samples 500 \
+  --max-steps 12 \
+  --invariants groupCountMatchesMounted routingLayoutStable mountedStatusesCoherent \
+    learnerGroupDoesNotLead proposalOutcomeMatchesRoute readyGroupsAreMounted
+
+cargo test -p nodedb-cluster multiraft_matches_quint -- --nocapture
+
 quint run quint/raft/Snapshots.qnt \
   --max-samples 500 \
   --max-steps 12 \

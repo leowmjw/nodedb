@@ -4349,6 +4349,7 @@ dependencies = [
 name = "nodedb-cluster"
 version = "0.0.6"
 dependencies = [
+ "anyhow",
  "async-trait",
  "crc32c",
  "futures",
@@ -4357,6 +4358,7 @@ dependencies = [
  "nodedb-raft",
  "nodedb-types",
  "quinn",
+ "quint-connect",
  "rand 0.9.4",
  "rcgen 0.13.2",
  "redb",

@@ -3,9 +3,9 @@
 This directory contains executable Quint models for the NodeDB Raft protocol.
 The current models cover the single-voter core, three-node election,
 three-node AppendEntries replication, an integrated leader-completeness slice,
-learner/membership behavior, direct membership mutation, and the snapshot
-catch-up and restart/persistence paths. Each model can be simulated directly
-and checked against Rust with `quint-connect`.
+learner/membership behavior, direct membership mutation, a focused Multi-Raft
+slice, and the snapshot catch-up and restart/persistence paths. Each model can
+be simulated directly and checked against Rust with `quint-connect`.
 
 ## Day-to-Day Commands
 
@@ -120,6 +120,22 @@ Run the direct membership-mutation model against the Rust implementation:
 cargo test -p nodedb-raft membership_changes_match_quint -- --nocapture
 ```
 
+Run the focused Multi-Raft model directly:
+
+```sh
+quint run quint/raft/MultiRaft.qnt \
+  --max-samples 500 \
+  --max-steps 12 \
+  --invariants groupCountMatchesMounted routingLayoutStable mountedStatusesCoherent \
+    learnerGroupDoesNotLead proposalOutcomeMatchesRoute readyGroupsAreMounted
+```
+
+Run the focused Multi-Raft model against the Rust implementation:
+
+```sh
+cargo test -p nodedb-cluster multiraft_matches_quint -- --nocapture
+```
+
 Run the snapshot model directly:
 
 ```sh
@@ -174,6 +190,9 @@ cargo test -p nodedb-raft
 - `raft/MembershipChanges.qnt`: focused direct-membership model for
   `add_peer`, `remove_peer`, `remove_learner`, and `set_voters`, including
   quorum math, leader tracking, and heartbeat targets.
+- `raft/MultiRaft.qnt`: focused cluster-side model for mounted-group count,
+  stable vShard routing, per-group role/status independence, and correct
+  proposal routing across local groups.
 - `raft/Snapshots.qnt`: focused snapshot catch-up model with compacted leader
   log boundary, `snapshots_needed`, `InstallSnapshot`, and follower
   commit/applied advancement after snapshot apply.
@@ -192,6 +211,8 @@ cargo test -p nodedb-raft
   learner/membership model.
 - `../nodedb-raft/src/node/quint_connect_membership_changes.rs`: Rust driver
   for the direct membership-mutation model.
+- `../nodedb-cluster/src/multi_raft/quint_connect_multiraft.rs`: Rust driver
+  for the focused Multi-Raft model.
 - `../nodedb-raft/src/node/quint_connect_snapshots.rs`: Rust driver for the
   snapshot catch-up model.
 - `../nodedb-raft/src/node/quint_connect_restart.rs`: Rust driver for the
