@@ -53,4 +53,10 @@ pub enum CrdtError {
     },
 }
 
+impl From<loro::LoroError> for CrdtError {
+    fn from(e: loro::LoroError) -> Self {
+        CrdtError::Loro(e.to_string())
+    }
+}
+
 pub type Result<T> = std::result::Result<T, CrdtError>;
