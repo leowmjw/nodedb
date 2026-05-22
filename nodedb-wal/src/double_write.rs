@@ -171,6 +171,7 @@ impl DoubleWriteBuffer {
         opts.read(true).write(true).create(true).truncate(false);
         #[cfg(not(target_arch = "wasm32"))]
         if mode == DwbMode::Direct {
+            #[cfg(target_os = "linux")]
             opts.custom_flags(libc::O_DIRECT);
         }
 

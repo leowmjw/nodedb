@@ -142,7 +142,8 @@ impl WalWriter {
 
         #[cfg(not(target_arch = "wasm32"))]
         if config.use_direct_io {
-            // O_DIRECT: bypass page cache.
+            // O_DIRECT: bypass page cache (Linux only).
+            #[cfg(target_os = "linux")]
             opts.custom_flags(libc::O_DIRECT);
         }
 
@@ -232,6 +233,7 @@ impl WalWriter {
 
         #[cfg(not(target_arch = "wasm32"))]
         if config.use_direct_io {
+            #[cfg(target_os = "linux")]
             opts.custom_flags(libc::O_DIRECT);
         }
 

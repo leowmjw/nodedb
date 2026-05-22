@@ -101,7 +101,7 @@ pub fn read_checkpoint_dontneed(path: &Path) -> Result<Vec<u8>> {
     let len = file.metadata().map_err(WalError::Io)?.len();
     let bytes = fs::read(path).map_err(WalError::Io)?;
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     {
         use std::os::unix::io::AsRawFd as _;
         // Safe: `file` owns the fd for the duration of the call; len fits in
