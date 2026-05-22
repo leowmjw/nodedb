@@ -24,7 +24,7 @@ use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "linux")]
 use std::os::unix::fs::OpenOptionsExt as _;
 
 use crate::align::{AlignedBuf, DEFAULT_ALIGNMENT};

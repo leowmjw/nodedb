@@ -98,7 +98,7 @@ pub fn atomic_swap_dirs_fsync(live: &Path, backup: &Path, staged: &Path) -> Resu
 /// plain read.
 pub fn read_checkpoint_dontneed(path: &Path) -> Result<Vec<u8>> {
     let file = fs::File::open(path).map_err(WalError::Io)?;
-    let len = file.metadata().map_err(WalError::Io)?.len();
+    let _len = file.metadata().map_err(WalError::Io)?.len();
     let bytes = fs::read(path).map_err(WalError::Io)?;
 
     #[cfg(target_os = "linux")]
