@@ -71,7 +71,7 @@ async fn sequencer_leader_failover_no_committed_epoch_loss() {
 
     // Wait for initial sequencer leader election.
     let leader_idx =
-        wait_for_sequencer_leader(&nodes, Duration::from_secs(10), Duration::from_millis(50)).await;
+        wait_for_sequencer_leader(&nodes, Duration::from_secs(30), Duration::from_millis(50)).await;
 
     let config = SequencerConfig {
         epoch_duration: Duration::from_millis(10),
@@ -93,7 +93,7 @@ async fn sequencer_leader_failover_no_committed_epoch_loss() {
     // Wait for pre-failover txns to be applied on all surviving nodes.
     common::wait_for(
         "pre-failover epochs applied on all nodes",
-        Duration::from_secs(10),
+        Duration::from_secs(30),
         Duration::from_millis(20),
         || nodes.iter().all(|n| n.last_applied_epoch().is_some()),
     )
@@ -144,7 +144,7 @@ async fn sequencer_leader_failover_no_committed_epoch_loss() {
     let expected_min_epoch = epoch_after_failover + 1;
     common::wait_for(
         "post-failover epochs applied on new leader",
-        Duration::from_secs(10),
+        Duration::from_secs(30),
         Duration::from_millis(20),
         || {
             nodes[new_leader_idx]

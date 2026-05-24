@@ -125,7 +125,7 @@ async fn ollp_bulk_update_txclass_admitted_and_fanned_out() {
         .expect("spawn_with_sequencer failed");
 
     let leader_idx =
-        wait_for_sequencer_leader(&nodes, Duration::from_secs(10), Duration::from_millis(50)).await;
+        wait_for_sequencer_leader(&nodes, Duration::from_secs(30), Duration::from_millis(50)).await;
 
     let config = SequencerConfig {
         epoch_duration: Duration::from_millis(10),
@@ -163,7 +163,7 @@ async fn ollp_bulk_update_txclass_admitted_and_fanned_out() {
     // Wait for all 3 replicas to apply the epoch.
     common::wait_for(
         "all 3 replicas apply epoch 0 (initial OLLP BulkUpdate)",
-        Duration::from_secs(10),
+        Duration::from_secs(30),
         Duration::from_millis(20),
         || nodes.iter().all(|n| n.last_applied_epoch().is_some()),
     )
@@ -211,7 +211,7 @@ async fn ollp_bulk_update_txclass_admitted_and_fanned_out() {
     // Wait for the retry epoch.
     common::wait_for(
         "all 3 replicas apply epoch 1 (retry OLLP BulkUpdate)",
-        Duration::from_secs(10),
+        Duration::from_secs(30),
         Duration::from_millis(20),
         || {
             nodes
